@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit",
+      "Bash(bun:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(timeout * bun:*)",
+      "Bash(find:*)",
+      "Bash(curl:*)",
+      "Bash(cat:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "WebSearch",
+      "mcp__ide__getDiagnostics"
+    ]
+  }
+}

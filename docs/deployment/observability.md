@@ -1,0 +1,190 @@
+# Observability
+
+Monitor the gateway using Prometheus metrics and optional OpenTelemetry tracing.
+
+## Overview
+
+The gateway exposes operational data through:
+
+- **Prometheus metrics** at `GET /metrics` (enabled by default)
+- **Health checks** at `GET /health` for load balancer probes
+- **OpenTelemetry tracing** via OTLP export (optional, disabled by default)
+
+## Prometheus Metrics
+
+### Scraping Configuration
+
+The metrics endpoint is unauthenticated and available at:
+
+- **Endpoint**: `GET /metrics` (configurable via `VTOL_METRICS_PATH`)
+- **Port**: Same as gateway (default `5969`)
+- **Format**: Prometheus text exposition format
+
+If you change `VTOL_METRICS_PATH`, update your Prometheus `metrics_path` accordingly.
+
+Example Prometheus `scrape_configs`:
+
+```yaml
+scrape_configs:
+  # Gateway metrics
+  - job_name: "vllm-responses"
+    static_configs:
+      - targets: ["gateway-host:5969"]
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+
+  # Also scrape vLLM metrics (if running locally)
+  - job_name: "vllm"
+    static_configs:
+      - targets: ["localhost:8457"]
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+```
+
+!!! note "Also scrape vLLM"
+
+    Remember to scrape your vLLM instance separately (it is a different service, with its own metrics). See [vLLM metrics documentation](https://docs.vllm.ai/en/stable/design/metrics/) for details.
+
+### Multi-Worker Support
+
+When running with multiple workers (`--gateway-workers N`), metrics are automatically aggregated across all workers when using `vllm-responses serve`.
+
+**Using `vllm-responses serve` (recommended):**
+
+Multi-process metrics are handled automatically. The supervisor creates a temporary directory for Prometheus multi-process mode and configures the workers correctly.
+
+We intentionally do not document manual multi-worker ASGI server setups here (Gunicorn/Uvicorn/etc.), because correct multi-process Prometheus aggregation requires additional lifecycle wiring (per-run multiprocess directories and worker-exit cleanup hooks).
+
+### Available Metrics
+
+All metrics use the `vtol_` prefix.
+
+#### HTTP Metrics
+
+| Metric                               | Type      | Labels                      | Description                                                          |
+| ------------------------------------ | --------- | --------------------------- | -------------------------------------------------------------------- |
+| `vtol_http_requests_total`           | Counter   | `method`, `route`, `status` | Total HTTP requests completed                                        |
+| `vtol_http_request_duration_seconds` | Histogram | `method`, `route`           | HTTP handler duration (excludes SSE stream lifetime)                 |
+| `vtol_http_in_flight_requests`       | Gauge     | -                           | Requests currently being handled (does not include open SSE streams) |
+
+#### SSE Streaming Metrics
+
+| Metric                             | Type      | Labels  | Description                                                                                |
+| ---------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------ |
+| `vtol_sse_connections_in_flight`   | Gauge     | -       | SSE connections currently open                                                             |
+| `vtol_sse_stream_duration_seconds` | Histogram | `route` | Full SSE stream lifetime from request start (including time-to-first-chunk) to termination |
+
+SSE metrics capture the end-to-end streaming duration for the `/v1/responses` endpoint, which is the primary API path.
+
+#### Tool Metrics
+
+| Metric                                 | Type      | Labels      | Description                        |
+| -------------------------------------- | --------- | ----------- | ---------------------------------- |
+| `vtol_tool_calls_requested_total`      | Counter   | `tool_type` | Tool calls requested by the model  |
+| `vtol_tool_calls_executed_total`       | Counter   | `tool_type` | Tool calls executed by the gateway |
+| `vtol_tool_execution_duration_seconds` | Histogram | `tool_type` | Tool execution wall-clock duration |
+| `vtol_tool_errors_total`               | Counter   | `tool_type` | Tool execution errors              |
+
+**Tool types:**
+
+- `function` - Client-executed function tools (counts model requests)
+- `code_interpreter` - Gateway-executed code interpreter
+
+#### Metric Labels
+
+Labels are bounded to prevent cardinality explosion:
+
+- `method`: HTTP method (GET, POST, etc.)
+- `route`: Route template (e.g., `/v1/responses`), not raw paths
+- `status`: HTTP status code (200, 400, 500, etc.)
+- `tool_type`: Tool category (function, code_interpreter)
+
+## OpenTelemetry Tracing
+
+Tracing is disabled by default. Enable it for distributed tracing of requests through the gateway.
+
+### Installation (optional dependencies)
+
+OpenTelemetry tracing requires the `tracing` optional dependencies.
+
+### Configuration
+
+Set the following environment variables:
+
+```bash
+# Enable tracing
+export VTOL_TRACING_ENABLED=true
+
+# Sampling ratio (0.0 to 1.0)
+export VTOL_TRACING_SAMPLE_RATIO=0.01
+
+# OTLP endpoint (gRPC)
+export VTOL_OPENTELEMETRY_HOST=otel-collector
+export VTOL_OPENTELEMETRY_PORT=4317
+
+# Service name in traces
+export VTOL_OTEL_SERVICE_NAME=vtol-gateway
+```
+
+### What Gets Traced
+
+When enabled, the gateway instruments:
+
+- **Inbound HTTP requests** (FastAPI/ASGI)
+- **Outbound HTTP to vLLM** (HTTPX client)
+
+### Prerequisites
+
+You need an OTLP-compatible collector or backend to receive traces:
+
+- [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
+- [Jaeger](https://www.jaegertracing.io/)
+- [Tempo](https://grafana.com/docs/tempo/)
+- Any other OTLP gRPC-compatible backend
+
+Example minimal OpenTelemetry Collector configuration:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  jaeger:
+    endpoint: jaeger:14250
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger]
+```
+
+## Health Checks
+
+The gateway exposes a health endpoint for load balancer health probes:
+
+- **Endpoint**: `GET /health`
+- **Response**: `200 OK` with empty JSON object `{}`
+- **Authentication**: None
+
+Example:
+
+```bash
+curl http://localhost:5969/health
+```
+
+Use this endpoint for:
+
+- Kubernetes liveness and readiness probes
+- AWS ALB/NLB health checks
+- Docker health checks
+- Load balancer health monitoring
+
+## Configuration Reference
+
+For a complete list of observability environment variables and their defaults, see the [Configuration Reference](../reference/configuration.md).
