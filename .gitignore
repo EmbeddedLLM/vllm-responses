@@ -13,7 +13,7 @@ thumbs.db
 *.parquet
 .cache/
 
-# Research artifacts / local harnesses (keep out of git; curated fixtures live under `responses/python/tests/cassettes/`)
+# Research artifacts / local harnesses (keep out of git; curated fixtures live under `responses/tests/cassettes/`)
 /cassettes/
 /study/
 /plans/
@@ -27,11 +27,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info
+*.whl
 .pytest_cache
 .ipynb_checkpoints
 venv/
 responses/dist
-responses/python/vtol/tools/code_interpreter/bin    
+responses/wheelhouse/
+responses/python/vllm_responses/tools/code_interpreter/bin    
 
 # pip
 **/build/
@@ -52,7 +54,7 @@ responses/python/vtol/tools/code_interpreter/bin
 # JavaScript
 **/node_modules/
 **/logs
-responses/python/vtol/tools/code_interpreter/pyodide-*.tar.bz2
+responses/python/vllm_responses/tools/code_interpreter/pyodide-*.tar.bz2
 
 # db related
 **/ch_data/
@@ -61,3 +63,4 @@ responses/python/vtol/tools/code_interpreter/pyodide-*.tar.bz2
 /db/
 **/vl_data/
 **/rqlite_db/
+responses/python/vllm_responses/tools/code_interpreter/**/code-interpreter-server

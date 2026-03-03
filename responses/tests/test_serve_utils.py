@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from vtol.entrypoints.serve_utils import (
+from vllm_responses.entrypoints._serve_utils import (
     EnvLookup,
     cleanup_prometheus_multiproc_dir,
     cleanup_stale_prometheus_multiproc_dirs,
@@ -49,22 +49,22 @@ def test_read_dotenv_parses_basic_kv(tmp_path: Path) -> None:
         "\n".join(
             [
                 "# comment",
-                "VTOL_FOO=bar",
-                "VTOL_QUOTED='baz'",
-                'VTOL_DQUOTED="qux"',
+                "VR_FOO=bar",
+                "VR_QUOTED='baz'",
+                'VR_DQUOTED="qux"',
                 "INVALID_LINE",
                 " =missing_key",
-                "VTOL_EMPTY=",
+                "VR_EMPTY=",
             ]
         ),
         encoding="utf-8",
     )
 
     parsed = read_dotenv(env_path)
-    assert parsed["VTOL_FOO"] == "bar"
-    assert parsed["VTOL_QUOTED"] == "baz"
-    assert parsed["VTOL_DQUOTED"] == "qux"
-    assert parsed["VTOL_EMPTY"] == ""
+    assert parsed["VR_FOO"] == "bar"
+    assert parsed["VR_QUOTED"] == "baz"
+    assert parsed["VR_DQUOTED"] == "qux"
+    assert parsed["VR_EMPTY"] == ""
     assert "INVALID_LINE" not in parsed
 
 
@@ -145,7 +145,7 @@ def test_wait_http_ready_fails_fast_on_unauthorized_response() -> None:
     thread.start()
     try:
         host, port = server.server_address
-        with pytest.raises(RuntimeError, match=r"requires auth|VTOL_OPENAI_API_KEY"):
+        with pytest.raises(RuntimeError, match=r"requires auth|VR_OPENAI_API_KEY"):
             wait_http_ready(
                 name="upstream",
                 url=f"http://{host}:{port}/v1/models",
@@ -168,7 +168,7 @@ def test_prometheus_multiproc_dir_lifecycle(tmp_path: Path) -> None:
 
 
 def test_cleanup_stale_prometheus_multiproc_dirs_removes_dead_pids(tmp_path: Path) -> None:
-    root = tmp_path / "vtol-prom-multiproc"
+    root = tmp_path / "vllm_responses-prom-multiproc"
     root.mkdir()
     stale = root / "999999-abcdef"
     stale.mkdir()
@@ -182,17 +182,17 @@ def test_cleanup_stale_prometheus_multiproc_dirs_removes_dead_pids(tmp_path: Pat
 async def test_sqlite_engine_pragmas_do_not_crash(tmp_path):
     # Regression: SQLite PRAGMAs (notably `journal_mode=WAL`) must not fail due to running
     # "within a transaction" on async sqlite drivers.
-    from vtol import db as vtol_db
-    from vtol.configs import ENV_CONFIG
+    from vllm_responses import db as vllm_responses_db
+    from vllm_responses.configs import ENV_CONFIG
 
     original_db_path = ENV_CONFIG.db_path
     try:
         ENV_CONFIG.db_path = f"sqlite+aiosqlite:///{tmp_path / 'pragmas.db'}"
-        vtol_db.create_db_engine_async.cache_clear()
-        engine = vtol_db.create_db_engine_async()
+        vllm_responses_db.create_db_engine_async.cache_clear()
+        engine = vllm_responses_db.create_db_engine_async()
         async with engine.connect() as conn:
             await conn.exec_driver_sql("SELECT 1")
         await engine.dispose()
     finally:
         ENV_CONFIG.db_path = original_db_path
-        vtol_db.create_db_engine_async.cache_clear()
+        vllm_responses_db.create_db_engine_async.cache_clear()

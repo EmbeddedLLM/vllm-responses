@@ -145,6 +145,15 @@ Corresponding strategies:
 - Code is primarily written for humans to read and maintain; machine execution is just a byproduct.
 - Priority: **Readability and maintainability > Correctness (including boundary conditions and error handling) > Performance > Code length**.
 - Strictly follow idiomatic practices and best practices of each language community (Python, etc.).
+- Prefer explicit, typed boundaries for cross-module data flow; avoid `dict[str, Any]` unless the payload is truly open-ended.
+- Standardize type container choices:
+  - Use `TypedDict` for lightweight dict-shaped internal payloads without runtime validation.
+  - Use `dataclass` for internal domain records with stable structure and minimal parsing overhead.
+  - Use Pydantic models at external/untrusted boundaries requiring validation or coercion.
+- For stable call sites, prefer explicit named arguments over `**kwargs` unpacking for better readability, safety, and refactorability.
+- At provider/tool integration boundaries, parse dynamic JSON into validated internal structures before business logic.
+- Keep canonicalization/serialization behavior deterministic and centralized; if non-obvious, add concise comments describing why.
+- Remove dead compatibility/debug placeholders (for example unused assignments) when they no longer serve a concrete purpose.
 - Actively identify and point out the following "code smells":
   - Duplicate logic / copy-paste code;
   - Overly tight coupling between modules or circular dependencies;
@@ -171,6 +180,7 @@ Corresponding strategies:
 - Comments:
   - Only add comments when behavior or intent is not obvious;
   - Comments should explain "why this is done" rather than restating "what the code does".
+  - When code mirrors an upstream API/signature or library contract, add a short reference comment so future refactors preserve alignment.
 
 ### 4.1 Testing
 
@@ -293,6 +303,20 @@ For each user question (especially non-trivial tasks), your answer should includ
   - Maintainability and evolution strategies.
 - When no significant missing information requires clarification, minimize unnecessary back-and-forth and questioning dialogues, directly providing high-quality, well-thought-out conclusions and implementation suggestions.
 
+### 9.1 · Design Specifications
+
+- All deging specifications should be put in the deisgn_docs/ folder
+- Whenever creating a new specifications, it's CRUCIAL to double check new spec does not conflict with existing specs
+  - if conflict is found, STOP, THINK of 2-3 solutions to tackle the conflict, then ASK the user for decision to revolve it. 
+- A design specificaiton needs to be: 
+  - self-complete: reader should be able to rely solely (or with minimal and proper reference) on this specification to understand the design.
+  - no-ambiguity: all design and implementation should have no ambiguity such that reader do not have to second guess the implementation detail.
+  - when in doubt with missing details, ASK for clarification. 
+- Whenever completing the design docs re-read it to ensure it's all according to the discuss.
+- If implementation changes contract-relevant behavior (for example boundary parsing, canonicalization, or error mapping), update the corresponding design doc in the same change.
+- Once decisions are finalized, rewrite specs to read as final decisions rather than back-and-forth discussion history.
+- During implmentation, can use the design docs as a worklog to keep track of the progress.
+
 ---
 
 ## 10. Project
@@ -308,3 +332,98 @@ For each user question (especially non-trivial tasks), your answer should includ
 - User-facing documentation is located in `docs/`.
 - Maintainer design docs are in `design_docs/`.
 - When explaining features to users, refer to the `docs/` structure.
+
+## 12 · Repository Knowledge Baseline
+
+This section captures compact project knowledge for execution efficiency and should be kept aligned with current code and documentation.
+
+### 12.1 Product Intent
+
+- This repo implements `vllm-responses`: a FastAPI gateway exposing OpenAI-style Responses API at `POST /v1/responses`.
+- It sits in front of an OpenAI-compatible upstream (primarily vLLM Chat Completions at `/v1/chat/completions`).
+- Primary value-adds:
+  - Responses-compatible streaming/non-stream response contract.
+  - Stateful continuation via `previous_response_id`.
+  - Gateway-hosted built-in tool execution (`code_interpreter`).
+
+### 12.2 Core Architecture (Current)
+
+- Runtime package root: `responses/python/vtol/`.
+- Request flow: Router -> `LMEngine` -> `responses_core` pipeline.
+- `responses_core` layers:
+  - `normalizer.py`: `pydantic_ai` events -> internal normalized events.
+  - `composer.py`: normalized events -> Responses lifecycle/item/content/tool events.
+  - `sse.py`: SSE framing + terminal `data: [DONE]\n\n`.
+  - `store.py`: DB-backed state store + request rehydration for `previous_response_id`.
+- Current architecture direction is “fusion”: keep `pydantic_ai` for upstream normalization, keep gateway-owned contract composition/statefulness.
+
+### 12.3 Technology Choices (Why)
+
+- FastAPI/Starlette + Gunicorn/Uvicorn:
+  - Async HTTP/SSE, production worker model, predictable Python ops.
+- `pydantic_ai`:
+  - Reuses mature parsing of streaming part deltas/tool-call assembly.
+- SQLModel/SQLAlchemy + SQLite/Postgres:
+  - Shared persistence across workers for stateful continuation.
+- Optional Redis cache for hot ResponseStore reads:
+  - Performance optimization only; DB remains source of truth.
+- Bun + Pyodide for code interpreter:
+  - Sandboxed Python execution; Linux wheels include bundled executable.
+- Prometheus metrics + optional OTel tracing:
+  - Low-friction default observability with opt-in tracing depth.
+
+### 12.4 Operational Entry and Runtime Modes
+
+- Intended entrypoint: `vllm-responses serve`.
+- `serve` supervises gateway + optional spawned vLLM + optional spawned code-interpreter service.
+- Upstream modes:
+  - `--upstream ...` (external model service).
+  - `-- <vllm args...>` (spawn vLLM subprocess).
+- Code interpreter modes:
+  - `spawn`, `external`, `disabled`.
+- Multi-worker safety:
+  - Supervisor initializes DB schema once and exports `VTOL_DB_SCHEMA_READY=1`.
+
+### 12.5 Stateful Semantics (Current Policy)
+
+- `previous_response_id` is implemented.
+- Rehydration model: append prior hydrated input + prior response output + new input.
+- Responses are persisted on completed runs for continuation lookup.
+- Tool persistence policy includes validation around omitted tools vs explicit `tool_choice`.
+
+### 12.6 Tooling Semantics
+
+- Supported tools in gateway path:
+  - Custom function tools (client executes via tool loop).
+  - Built-in `code_interpreter` (gateway executes).
+- `code_interpreter_call.outputs` is expansion-gated by `include=["code_interpreter_call.outputs"]`.
+- Code interpreter output mapping currently prioritizes logs/stdout+stderr and final expression result.
+
+### 12.7 Streaming Contract Notes
+
+- Stream emits structured Responses lifecycle and item/content/tool events.
+- Composer owns stable item identity/index consistency and event ordering.
+- Stream terminal marker uses spec-first `data: [DONE]\n\n`.
+- Operational evidence exists in cassettes and design docs; implementation remains spec-first by default.
+
+### 12.8 Testing and Evidence Model
+
+- Tests are in `responses/tests/`.
+- Deterministic replay uses mock upstream and cassette fixtures.
+- Conformance and behavior evidence live in:
+  - `responses/tests/cassettes/responses/`
+  - `responses/tests/cassettes/chat_completion/`
+  - `design_docs/openai_operational_truth.md`
+  - `design_docs/openresponses_conformance.md`
+- CI includes docs build, lint, pytest, and wheel build/smoke workflows.
+
+### 12.9 Source-of-Truth Navigation
+
+- User-facing behavior: `docs/`.
+- Maintainer architecture/decisions: `design_docs/`.
+- Packaging/runtime specifics: `responses/pyproject.toml`, `responses/setup.py`, `responses/MANIFEST.in`.
+- Core implementation files:
+  - `responses/python/vtol/lm.py`
+  - `responses/python/vtol/routers/serving.py`
+  - `responses/python/vtol/responses_core/*`
+  - `responses/python/vtol/tools/code_interpreter/*`

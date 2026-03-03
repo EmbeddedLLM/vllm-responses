@@ -1,4 +1,4 @@
-from vtol.tools import CODE_INTERPRETER_TOOL, TOOLS
+from vllm_responses.tools import CODE_INTERPRETER_TOOL, TOOLS
 
 
 def test_registered_tool_name_matches_registry_key() -> None:

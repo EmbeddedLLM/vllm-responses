@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from vtol.tools.code_interpreter import run_code, start_server
+from vllm_responses.tools.code_interpreter import run_code, start_server
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture(scope="module")
 async def code_interpreter_server() -> None:
-    cache_dir = os.environ.get("VTOL_PYODIDE_CACHE_DIR", "").strip()
+    cache_dir = os.environ.get("VR_PYODIDE_CACHE_DIR", "").strip()
     if cache_dir:
         cache_path = Path(os.path.expanduser(cache_dir))
     else:
@@ -32,7 +32,7 @@ async def code_interpreter_server() -> None:
             "Pyodide cache is not initialized. The code interpreter tests require Pyodide to be installed "
             "ahead of time (we do not auto-download ~400MB during tests).\n\n"
             "Bootstrap it with:\n"
-            f"  VTOL_PYODIDE_CACHE_DIR={str(cache_path)!r} {sys.executable} {bootstrap}\n"
+            f"  VR_PYODIDE_CACHE_DIR={str(cache_path)!r} {sys.executable} {bootstrap}\n"
         )
 
     # Use multiple workers to cover the WorkerPool path (when supported by the runtime).

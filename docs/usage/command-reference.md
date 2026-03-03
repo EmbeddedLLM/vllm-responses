@@ -15,7 +15,10 @@ The `vllm-responses serve` command acts as a supervisor. It can run in two prima
 1. **External Upstream**: Connects to an existing, already-running vLLM server.
 1. **Spawn vLLM**: Starts and manages a vLLM process as a subprocess.
 
-It also manages the **Code Interpreter** runtime (unless disabled).
+It also manages:
+
+1. the **Code Interpreter** runtime (unless disabled),
+1. the singleton **Built-in MCP** runtime process (when `VTOL_MCP_CONFIG_PATH` is set).
 
 ______________________________________________________________________
 
@@ -103,6 +106,14 @@ For scalar values (ports, workers, timeouts), precedence is presence-based:
 - If a CLI arg is provided, it wins even when the value is falsy (for example `0` or `0.0`).
 - Env/default fallback is only used when a CLI arg is absent.
 
+Built-in MCP runtime configuration is environment-only in this command:
+
+- Set `VTOL_MCP_CONFIG_PATH=/path/to/mcp.json` to enable Built-in MCP.
+- There is currently no dedicated `serve` CLI flag for MCP config path.
+- `VTOL_MCP_BUILTIN_RUNTIME_URL` is the single runtime-address knob (default `http://127.0.0.1:5981` when unset).
+- When enabled, `serve` starts one loopback Built-in MCP runtime and injects `VTOL_MCP_BUILTIN_RUNTIME_URL` into gateway workers.
+- Set `VTOL_MCP_BUILTIN_RUNTIME_URL` only when you need a different loopback port/host in `serve`, or when manually wiring workers to a separately managed runtime.
+
 Upstream selection precedence:
 
 1. `--upstream` (external upstream; `/v1` normalized). Error if used together with `--`.
@@ -115,7 +126,7 @@ Upstream selection precedence:
 ### Connect to External Server
 
 ```bash
-vllm-responses serve --upstream http://127.0.0.1:8457
+--8<-- "snippets/serve_external_upstream_cmd.txt"
 ```
 
 ### Spawn vLLM (Simple)

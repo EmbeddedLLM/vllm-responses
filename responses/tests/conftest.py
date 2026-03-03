@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
@@ -7,18 +8,24 @@ import httpx
 import pytest
 from fastapi import FastAPI, Response
 
-from vtol.entrypoints import llm as mock_llm
-from vtol.responses_core.store import DBResponseStore
-from vtol.routers import serving
-from vtol.utils.cassette_replay import CassetteQueue, CassetteReplayer, load_cassette_yaml
+from vllm_responses.entrypoints import llm as mock_llm
+from vllm_responses.entrypoints.state import VRAppState, VRRequestState
+from vllm_responses.responses_core.store import DBResponseStore
+from vllm_responses.routers import serving
+from vllm_responses.types.api import UserAgent
+from vllm_responses.utils.cassette_replay import (
+    CassetteQueue,
+    CassetteReplayer,
+    load_cassette_yaml,
+)
+from vllm_responses.utils.exceptions import VRException
+from vllm_responses.utils.handlers import exception_handler, path_not_found_handler
 
 
 @pytest.fixture
 def chat_completion_cassettes_dir() -> Path:
-    # `responses/tests/...` → `responses/` → `responses/python/tests/cassettes/chat_completion`
-    return (
-        Path(__file__).resolve().parents[1] / "python" / "tests" / "cassettes" / "chat_completion"
-    )
+    # `responses/tests/...` → `responses/` → `responses/tests/cassettes/chat_completion`
+    return Path(__file__).resolve().parent / "cassettes" / "chat_completion"
 
 
 @pytest.fixture
@@ -61,8 +68,22 @@ def stub_code_interpreter_app() -> FastAPI:
 
 @pytest.fixture
 def gateway_app() -> FastAPI:
-    app = FastAPI(title="VTOL Gateway (test)")
+    app = FastAPI(title="VR Gateway (test)")
+    app.state.vllm_responses = VRAppState()
     app.include_router(serving.router)
+
+    @app.middleware("http")
+    async def _init_request_state(request, call_next):
+        request.state.vllm_responses = VRRequestState(
+            id="test-request-id",
+            user_agent=UserAgent.from_user_agent_string("pytest"),
+            timing=defaultdict(float),
+        )
+        return await call_next(request)
+
+    app.add_exception_handler(VRException, exception_handler)
+    app.add_exception_handler(Exception, exception_handler)
+    app.add_exception_handler(404, path_not_found_handler)
     return app
 
 
@@ -74,9 +95,14 @@ async def patched_gateway_clients(
 ) -> AsyncIterator[None]:
     """
     Patch:
-    - upstream LLM calls → in-process ASGI mock (`vtol.entrypoints.llm.app`)
+    - upstream LLM calls → in-process ASGI mock (`vllm_responses.entrypoints.llm.app`)
     - code interpreter HTTP calls → in-process ASGI stub
     """
+    # Keep mock LLM cassette replay isolated per test to avoid cross-test scenario
+    # cursor leakage (Scenario "default" exhaustion).
+    previous_replayer = mock_llm.app.state.vllm_responses.cassette_replayer
+    mock_llm.app.state.vllm_responses.cassette_replayer = None
+
     llm_transport = httpx.ASGITransport(app=mock_llm.app)
     llm_client = httpx.AsyncClient(transport=llm_transport, base_url="http://mock/v1")
 
@@ -88,8 +114,8 @@ async def patched_gateway_clients(
     def _provider_override():
         return OpenAIProvider(api_key="test", base_url="http://mock/v1", http_client=llm_client)
 
-    import vtol.lm as lm
-    import vtol.tools.code_interpreter as code_interpreter
+    import vllm_responses.lm as lm
+    import vllm_responses.tools.code_interpreter as code_interpreter
 
     store = DBResponseStore.from_db_url(
         db_url=f"sqlite+aiosqlite:///{tmp_path / 'responses_state.db'}"
@@ -102,6 +128,7 @@ async def patched_gateway_clients(
     try:
         yield
     finally:
+        mock_llm.app.state.vllm_responses.cassette_replayer = previous_replayer
         await store.aclose()
         await llm_client.aclose()
         await tool_client.aclose()

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vtol.entrypoints.serve import _build_root_parser, _normalize_remainder_args
+from vllm_responses.entrypoints.serve import _build_root_parser, _normalize_remainder_args
 
 
 def test_normalize_remainder_args_strips_single_leading_delimiter() -> None:

@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
 
 
 _BUNDLED_BINARY = Path(
-    "python/vtol/tools/code_interpreter/bin/linux/x86_64/code-interpreter-server"
+    "python/vllm_responses/tools/code_interpreter/bin/linux/x86_64/code-interpreter-server"
 )
 
 

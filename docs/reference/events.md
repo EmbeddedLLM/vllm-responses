@@ -24,6 +24,12 @@ Fired when the response generation is successfully finished.
 
 **Payload:** `{ "response": { "status": "completed", "output": [...], "usage": {...} } }`
 
+### `response.incomplete`
+
+Fired when generation reaches an incomplete terminal state (for example output-token truncation or content filtering).
+
+**Payload:** `{ "response": { "status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}, ... } }`
+
 ### `response.failed`
 
 Fired if an error occurs during generation.
@@ -137,6 +143,44 @@ The code has been sent to the runtime and is executing.
 #### `response.code_interpreter_call.completed`
 
 Execution has finished (logs/images are available in the final item).
+
+### MCP Tool Calls (Hosted + Client-Specified Remote)
+
+#### `response.mcp_call.in_progress`
+
+MCP call has started.
+
+#### `response.mcp_call_arguments.delta`
+
+Streaming MCP arguments JSON chunks.
+
+**Payload:** `{ "delta": "{\"query\":", ... }`
+
+#### `response.mcp_call_arguments.done`
+
+Final MCP arguments JSON string.
+
+**Payload:** `{ "arguments": "{\"query\":\"migration notes\"}", ... }`
+
+#### `response.mcp_call.completed`
+
+MCP call completed successfully.
+
+**Payload:** `{ "output": "{...}", ... }`
+
+#### `response.mcp_call.failed`
+
+MCP call failed at item level.
+
+**Payload:** `{ "item_id": "...", "output_index": 2, "sequence_number": 53, ... }`
+
+When `response.output_item.done` is emitted for MCP, the item type is `mcp_call` and includes:
+
+- `server_label`
+- `name`
+- `arguments`
+- `status` (`completed` or `failed`)
+- `output` (on success) or `error` (on failure)
 
 ______________________________________________________________________
 

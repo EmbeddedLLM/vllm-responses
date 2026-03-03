@@ -37,7 +37,7 @@ jobs:
     name: Pytest
     runs-on: ubuntu-latest
     env:
-      VTOL_PYODIDE_CACHE_DIR: ~/.cache/vllm-responses/pyodide
+      VR_PYODIDE_CACHE_DIR: ~/.cache/vllm-responses/pyodide
 
     steps:
       - name: Checkout code

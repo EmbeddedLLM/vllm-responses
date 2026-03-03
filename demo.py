@@ -1,4 +1,4 @@
-from vtol.lm import LMEngine, vLLMResponsesRequest
+from vllm_responses.lm import LMEngine, vLLMResponsesRequest
 
 
 async def main():

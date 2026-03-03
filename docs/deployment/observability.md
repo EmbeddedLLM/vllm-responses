@@ -78,17 +78,24 @@ SSE metrics capture the end-to-end streaming duration for the `/v1/responses` en
 
 #### Tool Metrics
 
-| Metric                                 | Type      | Labels      | Description                        |
-| -------------------------------------- | --------- | ----------- | ---------------------------------- |
-| `vtol_tool_calls_requested_total`      | Counter   | `tool_type` | Tool calls requested by the model  |
-| `vtol_tool_calls_executed_total`       | Counter   | `tool_type` | Tool calls executed by the gateway |
-| `vtol_tool_execution_duration_seconds` | Histogram | `tool_type` | Tool execution wall-clock duration |
-| `vtol_tool_errors_total`               | Counter   | `tool_type` | Tool execution errors              |
+| Metric                                 | Type      | Labels                   | Description                          |
+| -------------------------------------- | --------- | ------------------------ | ------------------------------------ |
+| `vtol_tool_calls_requested_total`      | Counter   | `tool_type`              | Tool calls requested by the model    |
+| `vtol_tool_calls_executed_total`       | Counter   | `tool_type`              | Tool calls executed by the gateway   |
+| `vtol_tool_execution_duration_seconds` | Histogram | `tool_type`              | Tool execution wall-clock duration   |
+| `vtol_tool_errors_total`               | Counter   | `tool_type`              | Tool execution errors                |
+| `vtol_mcp_server_startup_total`        | Counter   | `server_label`, `status` | Built-in MCP server startup outcomes |
 
 **Tool types:**
 
-- `function` - Client-executed function tools (counts model requests)
-- `code_interpreter` - Gateway-executed code interpreter
+- `function` - Client-executed function tools (request count only)
+- `code_interpreter` - Gateway-executed code interpreter (request + execution/error metrics)
+- `mcp` - MCP tool calls requested by the model (covers Built-in MCP and Remote MCP modes)
+
+Notes:
+
+- MCP metrics are not split by mode (Built-in MCP vs Remote MCP) in current metrics.
+- `vtol_mcp_server_startup_total` is hosted-only (there is no startup metric for Client-Specified Remote declarations).
 
 #### Metric Labels
 
@@ -97,7 +104,9 @@ Labels are bounded to prevent cardinality explosion:
 - `method`: HTTP method (GET, POST, etc.)
 - `route`: Route template (e.g., `/v1/responses`), not raw paths
 - `status`: HTTP status code (200, 400, 500, etc.)
-- `tool_type`: Tool category (function, code_interpreter)
+- `tool_type`: Tool category (`function`, `code_interpreter`, `mcp`)
+- `server_label`: Built-in MCP server label configured in runtime config
+- `status` (MCP startup metric): `ok` or `error`
 
 ## OpenTelemetry Tracing
 

@@ -8,12 +8,12 @@ from pydantic_ai import (
     ToolCallPartDelta,
 )
 
-from vtol.responses_core.models import (
+from vllm_responses.responses_core.models import (
     CodeInterpreterCallCodeDelta,
     CodeInterpreterCallCodeDone,
     CodeInterpreterCallStarted,
 )
-from vtol.responses_core.normalizer import PydanticAINormalizer
+from vllm_responses.responses_core.normalizer import PydanticAINormalizer
 
 
 def test_code_interpreter_code_deltas_emitted_from_tool_call_args_json_fragments():

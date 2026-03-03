@@ -5,8 +5,14 @@ FastAPI gateway that exposes an OpenAI-style **Responses API** (`/v1/responses`)
 - SSE streaming event shape + ordering
 - `previous_response_id` statefulness (ResponseStore)
 - gateway-executed built-in tool: `code_interpreter`
+- gateway-hosted MCP tools (`tools[].type="mcp"` with configured `server_label`)
 
-**[📚 Full User Documentation](docs/index.md)** (Guides, API Reference, Examples)
+Current MCP boundary:
+
+- `tools[].type="mcp"` is gateway-hosted MCP resolved via `VTOL_MCP_CONFIG_PATH`.
+- Request-declared MCP targets (`server_url`, `connector_id`) are not supported yet.
+
+**[📚 Full User Documentation](https://embeddedllm.github.io/vllm-responses/)** (Guides, API Reference, Examples)
 
 Design docs (maintainer-facing): `design_docs/index.md`.
 
@@ -80,10 +86,10 @@ Prereqs:
 
 - If you want to spawn vLLM: `vllm` must be installed (e.g. `uv pip install vllm`).
 - If `code_interpreter` is enabled (default), the first start may download the Pyodide runtime (~400MB) into a cache
-  directory (see `VTOL_PYODIDE_CACHE_DIR`). This requires `tar` to be installed.
+    directory (see `VTOL_PYODIDE_CACHE_DIR`). This requires `tar` to be installed.
 - For non-Linux platforms (or source installs without the bundled binary), you can disable the tool via
-  `--code-interpreter disabled`. For development you can also enable the Bun-based fallback via
-  `VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`.
+    `--code-interpreter disabled`. For development you can also enable the Bun-based fallback via
+    `VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`.
 
 External upstream (you start vLLM yourself; `/v1` is optional):
 

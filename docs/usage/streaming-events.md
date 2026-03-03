@@ -116,6 +116,75 @@ data: {
 }
 ```
 
+Terminal lifecycle event can be one of:
+
+- `response.completed` for successful completion
+- `response.incomplete` for token/content-filter truncation
+- `response.failed` for request/stream failure paths
+
+For stateful continuation, treat `response.completed` and `response.incomplete` as terminal response objects. If `store=true`, both can be used as `previous_response_id` in the next turn.
+
+### MCP Tool Call Sequence
+
+When using MCP tools (hosted or Client-Specified Remote), an output item can include additional tool-call events:
+
+```json
+event: response.output_item.added
+data: {
+  "output_index": 0,
+  "item": {
+    "id": "mcp_123",
+    "type": "mcp_call",
+    "status": "in_progress"
+  }
+}
+
+event: response.mcp_call.in_progress
+data: { ... }
+
+event: response.mcp_call_arguments.delta
+data: { "delta": "{\"query\":" ... }
+
+event: response.mcp_call_arguments.done
+data: { "arguments": "{\"query\":\"migration notes\"}" ... }
+
+event: response.mcp_call.completed
+data: { "output": "{\"results\":[...]}" ... }
+
+event: response.output_item.done
+data: {
+  "output_index": 0,
+  "item": {
+    "id": "mcp_123",
+    "type": "mcp_call",
+    "status": "completed",
+    "output": "{\"results\":[...]}"
+  }
+}
+```
+
+Failure path:
+
+```json
+event: response.mcp_call.failed
+data: {
+  "item_id": "mcp_123",
+  "output_index": 0,
+  "sequence_number": 12
+}
+
+event: response.output_item.done
+data: {
+  "output_index": 0,
+  "item": {
+    "id": "mcp_123",
+    "type": "mcp_call",
+    "status": "failed",
+    "error": "tools/call timeout after 60s"
+  }
+}
+```
+
 ### 6. Terminal Marker
 
 The stream ends with a specific marker, signaling the connection can be closed.

@@ -4,14 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from vtol.responses_core.store import DBResponseStore
-from vtol.types.openai import (
+from vllm_responses.responses_core.store import DBResponseStore
+from vllm_responses.types.openai import (
     OpenAIOutputItem,
     OpenAIOutputTextContent,
     OpenAIResponsesResponse,
     vLLMResponsesRequest,
 )
-from vtol.utils.exceptions import BadInputError
+from vllm_responses.utils.exceptions import BadInputError
 
 
 @pytest.mark.anyio
@@ -48,6 +48,56 @@ async def test_store_put_and_get_roundtrip(tmp_path: Path):
     assert payload.hydrated_input[0].role == "user"
 
 
+@pytest.mark.anyio
+async def test_store_put_and_get_roundtrip_incomplete_terminal(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    req = vLLMResponsesRequest(
+        model="test-model",
+        input=[{"role": "user", "content": "hi"}],
+        tool_choice="none",
+    )
+    resp = OpenAIResponsesResponse(
+        model="test-model",
+        status="incomplete",
+        incomplete_details={"reason": "max_output_tokens"},
+        output=[],
+    )
+
+    await store.put_completed(request=req, hydrated_request=req, response=resp)
+
+    stored = await store.get(response_id=resp.id)
+    assert stored is not None
+    payload = stored.payload()
+    assert payload.response.id == resp.id
+    assert payload.response.status == "incomplete"
+    assert payload.response.incomplete_details is not None
+    assert payload.response.incomplete_details.reason == "max_output_tokens"
+
+
+@pytest.mark.anyio
+async def test_store_skips_non_terminal_response_status(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    req = vLLMResponsesRequest(
+        model="test-model",
+        input=[{"role": "user", "content": "hi"}],
+        tool_choice="none",
+    )
+    resp = OpenAIResponsesResponse(
+        model="test-model",
+        status="in_progress",
+        output=[],
+    )
+
+    await store.put_completed(request=req, hydrated_request=req, response=resp)
+
+    stored = await store.get(response_id=resp.id)
+    assert stored is None
+
+
 class _StubCache:
     def __init__(self) -> None:
         self.data: dict[str, object] = {}
@@ -65,7 +115,7 @@ class _StubCache:
 async def test_store_get_prefers_cache_when_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import vtol.responses_core.store as store_mod
+    import vllm_responses.responses_core.store as store_mod
 
     db_path = tmp_path / "state.db"
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
@@ -111,7 +161,7 @@ async def test_store_get_prefers_cache_when_enabled(
 
 @pytest.mark.anyio
 async def test_store_get_populates_cache_on_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    import vtol.responses_core.store as store_mod
+    import vllm_responses.responses_core.store as store_mod
 
     db_path = tmp_path / "state.db"
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
@@ -144,7 +194,7 @@ async def test_store_get_populates_cache_on_miss(tmp_path: Path, monkeypatch: py
 async def test_store_get_falls_back_to_db_on_cache_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    import vtol.responses_core.store as store_mod
+    import vllm_responses.responses_core.store as store_mod
 
     class _ExplodingCache(_StubCache):
         async def get_json(self, key: str) -> object | None:

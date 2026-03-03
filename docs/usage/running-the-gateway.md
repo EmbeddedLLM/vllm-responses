@@ -10,10 +10,6 @@ We recommend running the gateway via `vllm-responses serve`.
 
     Starting the gateway via other mechanisms (e.g. calling `uvicorn`/`gunicorn` directly) is not intended.
 
-    In particular, multi-worker startup performs per-worker FastAPI lifespan initialization, which can cause
-    DB schema init races when using SQLite unless the `serve` supervisor initializes the schema once and
-    marks it ready for workers.
-
 ## Operational Modes
 
 ### 1. Spawning vLLM (Recommended)
@@ -49,7 +45,7 @@ In this mode, you manage the vLLM server process separately. This is ideal for:
 vllm serve meta-llama/Llama-3.2-3B-Instruct --port 8457
 
 # 2. Start the gateway pointing to it
-vllm-responses serve --upstream http://127.0.0.1:8457
+--8<-- "snippets/serve_external_upstream_cmd.txt"
 ```
 
 ______________________________________________________________________
@@ -58,12 +54,20 @@ ______________________________________________________________________
 
 While CLI flags are the primary way to configure the gateway, you can also use environment variables.
 
-| CLI Flag            | Environment Variable | Description       |
-| ------------------- | -------------------- | ----------------- |
-| `--upstream`        | `VTOL_LLM_API_BASE`  | Upstream vLLM URL |
-| `--gateway-host`    | `VTOL_HOST`          | Bind host         |
-| `--gateway-port`    | `VTOL_PORT`          | Bind port         |
-| `--gateway-workers` | `VTOL_WORKERS`       | Number of workers |
+| CLI Flag            | Environment Variable                 | Description                                 |
+| ------------------- | ------------------------------------ | ------------------------------------------- |
+| `--upstream`        | `VTOL_LLM_API_BASE`                  | Upstream vLLM URL                           |
+| `--gateway-host`    | `VTOL_HOST`                          | Bind host                                   |
+| `--gateway-port`    | `VTOL_PORT`                          | Bind port                                   |
+| `--gateway-workers` | `VTOL_WORKERS`                       | Number of workers                           |
+| (env only)          | `VTOL_MCP_CONFIG_PATH`               | Built-in MCP runtime config path            |
+| (env only)          | `VTOL_MCP_BUILTIN_RUNTIME_URL`       | Singleton Built-in MCP runtime loopback URL |
+| (env only)          | `VTOL_MCP_REQUEST_REMOTE_ENABLED`    | Enable/disable Remote MCP declarations      |
+| (env only)          | `VTOL_MCP_REQUEST_REMOTE_URL_CHECKS` | Enable/disable Remote MCP URL policy checks |
+
+When `VTOL_MCP_CONFIG_PATH` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
+If `VTOL_MCP_BUILTIN_RUNTIME_URL` is unset, `serve` uses `http://127.0.0.1:5981`.
+Set it only when you need a different loopback runtime address (for example, local port clashes) or when manually wiring workers to a separately managed runtime.
 
 See [Configuration Reference](../reference/configuration.md) for a complete list.
 
@@ -89,4 +93,5 @@ The gateway handles `SIGINT` (Ctrl+C) and `SIGTERM` gracefully:
 1. It stops accepting new connections.
 1. It waits for active requests to complete (within a timeout).
 1. It terminates the Code Interpreter subprocess (if spawned).
+1. It terminates the Built-in MCP runtime subprocess (if started).
 1. It terminates the vLLM subprocess (if spawned).

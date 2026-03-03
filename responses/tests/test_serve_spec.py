@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from vtol.entrypoints.serve_spec import (
+from vllm_responses.entrypoints._serve_spec import (
     ExternalUpstreamSpec,
     ServeSpecError,
     SpawnCodeInterpreterSpec,
     SpawnVllmSpec,
     build_serve_spec,
 )
-from vtol.entrypoints.serve_utils import EnvLookup
+from vllm_responses.entrypoints._serve_utils import EnvLookup
 
 
 def _base_args(**overrides) -> argparse.Namespace:
@@ -48,26 +48,26 @@ def test_build_serve_spec_errors_on_missing_model_after_delimiter() -> None:
 
 def test_build_serve_spec_upstream_flag_overrides_env_with_notice() -> None:
     args = _base_args(upstream="http://127.0.0.1:8457")
-    env = EnvLookup(environ={"VTOL_LLM_API_BASE": "http://example.invalid:9999"}, dotenv={})
+    env = EnvLookup(environ={"VR_LLM_API_BASE": "http://example.invalid:9999"}, dotenv={})
     spec = build_serve_spec(args, [], had_delimiter=False, env=env)
     assert isinstance(spec.upstream, ExternalUpstreamSpec)
     assert spec.upstream.base_url == "http://127.0.0.1:8457/v1"
     assert spec.notices == [
-        "[serve] notice: ignoring VTOL_LLM_API_BASE='http://example.invalid:9999' in favor of --upstream."
+        "[serve] notice: ignoring VR_LLM_API_BASE='http://example.invalid:9999' in favor of --upstream."
     ]
 
 
 def test_build_serve_spec_vllm_args_override_env_with_notice(monkeypatch) -> None:
-    import vtol.entrypoints.serve_spec as serve_spec_mod
+    import vllm_responses.entrypoints._serve_spec as serve_spec_mod
 
     monkeypatch.setattr(serve_spec_mod.shutil, "which", lambda name: "/usr/bin/vllm")
 
     args = _base_args(upstream=None)
-    env = EnvLookup(environ={"VTOL_LLM_API_BASE": "http://example.invalid:9999"}, dotenv={})
+    env = EnvLookup(environ={"VR_LLM_API_BASE": "http://example.invalid:9999"}, dotenv={})
     spec = build_serve_spec(args, ["model"], had_delimiter=True, env=env)
     assert isinstance(spec.upstream, SpawnVllmSpec)
     assert spec.notices == [
-        "[serve] notice: `--` was provided; ignoring VTOL_LLM_API_BASE in favor of spawning vLLM."
+        "[serve] notice: `--` was provided; ignoring VR_LLM_API_BASE in favor of spawning vLLM."
     ]
     assert spec.upstream.cmd[:2] == ["/usr/bin/vllm", "serve"]
     assert spec.upstream.bind_host == "127.0.0.1"
@@ -76,7 +76,7 @@ def test_build_serve_spec_vllm_args_override_env_with_notice(monkeypatch) -> Non
 
 
 def test_build_serve_spec_vllm_wildcard_bind_uses_loopback_for_urls(monkeypatch) -> None:
-    import vtol.entrypoints.serve_spec as serve_spec_mod
+    import vllm_responses.entrypoints._serve_spec as serve_spec_mod
 
     monkeypatch.setattr(serve_spec_mod.shutil, "which", lambda name: "/usr/bin/vllm")
 
@@ -97,7 +97,7 @@ def test_build_serve_spec_vllm_wildcard_bind_uses_loopback_for_urls(monkeypatch)
 def test_build_serve_spec_code_interpreter_prefers_bundled_binary(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import vtol.entrypoints.serve_spec as serve_spec_mod
+    import vllm_responses.entrypoints._serve_spec as serve_spec_mod
 
     class _FakeSpec:
         def __init__(self, path: Path) -> None:
@@ -117,7 +117,7 @@ def test_build_serve_spec_code_interpreter_prefers_bundled_binary(
         code_interpreter_port=5971,
         code_interpreter_workers=2,
     )
-    env = EnvLookup(environ={"VTOL_PYODIDE_CACHE_DIR": str(tmp_path / "cache")}, dotenv={})
+    env = EnvLookup(environ={"VR_PYODIDE_CACHE_DIR": str(tmp_path / "cache")}, dotenv={})
     spec = build_serve_spec(args, [], had_delimiter=False, env=env)
     assert isinstance(spec.code_interpreter, SpawnCodeInterpreterSpec)
     assert spec.code_interpreter.cmd[0] == str(bundled)
@@ -126,7 +126,7 @@ def test_build_serve_spec_code_interpreter_prefers_bundled_binary(
 
 
 def test_build_serve_spec_code_interpreter_uses_bun_fallback(tmp_path: Path, monkeypatch) -> None:
-    import vtol.entrypoints.serve_spec as serve_spec_mod
+    import vllm_responses.entrypoints._serve_spec as serve_spec_mod
 
     class _FakeSpec:
         def __init__(self, path: Path) -> None:
@@ -149,8 +149,8 @@ def test_build_serve_spec_code_interpreter_uses_bun_fallback(tmp_path: Path, mon
     )
     env = EnvLookup(
         environ={
-            "VTOL_PYODIDE_CACHE_DIR": str(tmp_path / "cache"),
-            "VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK": "1",
+            "VR_PYODIDE_CACHE_DIR": str(tmp_path / "cache"),
+            "VR_CODE_INTERPRETER_DEV_BUN_FALLBACK": "1",
         },
         dotenv={},
     )
@@ -163,7 +163,7 @@ def test_build_serve_spec_code_interpreter_uses_bun_fallback(tmp_path: Path, mon
 def test_build_serve_spec_code_interpreter_errors_without_binary_or_fallback(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import vtol.entrypoints.serve_spec as serve_spec_mod
+    import vllm_responses.entrypoints._serve_spec as serve_spec_mod
 
     class _FakeSpec:
         def __init__(self, path: Path) -> None:
@@ -179,14 +179,14 @@ def test_build_serve_spec_code_interpreter_errors_without_binary_or_fallback(
         code_interpreter_port=5971,
         code_interpreter_workers=0,
     )
-    env = EnvLookup(environ={"VTOL_PYODIDE_CACHE_DIR": str(tmp_path / "cache")}, dotenv={})
+    env = EnvLookup(environ={"VR_PYODIDE_CACHE_DIR": str(tmp_path / "cache")}, dotenv={})
     with pytest.raises(ServeSpecError, match=r"no bundled code-interpreter binary"):
         build_serve_spec(args, [], had_delimiter=False, env=env)
 
 
 def test_build_serve_spec_cli_zero_gateway_port_overrides_env() -> None:
     args = _base_args(upstream="http://127.0.0.1:8457", gateway_port=0)
-    env = EnvLookup(environ={"VTOL_PORT": "7777"}, dotenv={})
+    env = EnvLookup(environ={"VR_PORT": "7777"}, dotenv={})
     spec = build_serve_spec(args, [], had_delimiter=False, env=env)
     assert spec.gateway.port == 0
 
@@ -200,10 +200,72 @@ def test_build_serve_spec_cli_zero_values_override_env() -> None:
     )
     env = EnvLookup(
         environ={
-            "VTOL_CODE_INTERPRETER_WORKERS": "3",
+            "VR_CODE_INTERPRETER_WORKERS": "3",
         },
         dotenv={},
     )
     spec = build_serve_spec(args, [], had_delimiter=False, env=env)
     assert spec.code_interpreter_workers == 0
     assert spec.timeouts.vllm_ready_interval_s == 0.0
+
+
+def test_build_serve_spec_enables_builtin_mcp_runtime_only_with_config_path() -> None:
+    args = _base_args(upstream="http://127.0.0.1:8457")
+    spec_disabled = build_serve_spec(
+        args,
+        [],
+        had_delimiter=False,
+        env=EnvLookup(environ={}, dotenv={}),
+    )
+    assert spec_disabled.mcp_runtime is None
+
+    env = EnvLookup(
+        environ={
+            "VR_MCP_CONFIG_PATH": "/tmp/mcp.json",
+            "VR_MCP_BUILTIN_RUNTIME_URL": "http://127.0.0.1:6101",
+        },
+        dotenv={},
+    )
+    spec_enabled = build_serve_spec(args, [], had_delimiter=False, env=env)
+    assert spec_enabled.mcp_runtime is not None
+    assert spec_enabled.mcp_runtime.host == "127.0.0.1"
+    assert spec_enabled.mcp_runtime.port == 6101
+    assert spec_enabled.mcp_runtime.ready_url == "http://127.0.0.1:6101/health"
+
+
+def test_build_serve_spec_builtin_mcp_runtime_uses_default_url_when_unset() -> None:
+    args = _base_args(upstream="http://127.0.0.1:8457")
+    env = EnvLookup(environ={"VR_MCP_CONFIG_PATH": "/tmp/mcp.json"}, dotenv={})
+
+    spec = build_serve_spec(args, [], had_delimiter=False, env=env)
+
+    assert spec.mcp_runtime is not None
+    assert spec.mcp_runtime.host == "127.0.0.1"
+    assert spec.mcp_runtime.port == 5981
+    assert spec.mcp_runtime.ready_url == "http://127.0.0.1:5981/health"
+
+
+@pytest.mark.parametrize(
+    ("runtime_url", "error_pattern"),
+    [
+        ("https://127.0.0.1:5981", r"must use `http://`"),
+        ("http://example.com:5981", r"must use loopback host"),
+        ("http://127.0.0.1", r"must include an explicit port"),
+        ("http://127.0.0.1:5981/internal", r"must not include path, query, or fragment"),
+        ("http://127.0.0.1:70000", r"invalid VR_MCP_BUILTIN_RUNTIME_URL"),
+    ],
+)
+def test_build_serve_spec_builtin_mcp_runtime_url_validation(
+    runtime_url: str, error_pattern: str
+) -> None:
+    args = _base_args(upstream="http://127.0.0.1:8457")
+    env = EnvLookup(
+        environ={
+            "VR_MCP_CONFIG_PATH": "/tmp/mcp.json",
+            "VR_MCP_BUILTIN_RUNTIME_URL": runtime_url,
+        },
+        dotenv={},
+    )
+
+    with pytest.raises(ServeSpecError, match=error_pattern):
+        build_serve_spec(args, [], had_delimiter=False, env=env)

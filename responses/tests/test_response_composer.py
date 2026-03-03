@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from vtol.responses_core.composer import ResponseComposer
-from vtol.responses_core.models import (
+from vllm_responses.responses_core.composer import ResponseComposer
+from vllm_responses.responses_core.models import (
     CodeInterpreterCallCodeDone,
     CodeInterpreterCallCompleted,
     CodeInterpreterCallInterpreting,
@@ -16,7 +16,7 @@ from vtol.responses_core.models import (
     MessageStarted,
     UsageFinal,
 )
-from vtol.types.openai import OpenAIResponsesResponse
+from vllm_responses.types.openai import OpenAIResponsesResponse
 
 
 def _drain(composer: ResponseComposer, events: Iterable[object]):
@@ -89,6 +89,37 @@ def test_completed_response_omits_reasoning_item_when_no_thinking_part():
     resp = completed[0].response
     assert resp.output is not None
     assert [o.type for o in resp.output] == ["message"]
+
+
+def test_incomplete_response_sets_incomplete_details_for_max_output_tokens():
+    composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
+
+    out = _drain(
+        composer,
+        [
+            MessageStarted(item_key="m1"),
+            MessageDone(item_key="m1", text="Partial"),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=0,
+                incomplete_reason="max_output_tokens",
+            ),
+        ],
+    )
+
+    incomplete = [e for e in out if e.type == "response.incomplete"]
+    completed = [e for e in out if e.type == "response.completed"]
+    assert len(incomplete) == 1
+    assert not completed
+    resp = incomplete[0].response
+    assert resp.status == "incomplete"
+    assert resp.incomplete_details is not None
+    assert resp.incomplete_details.reason == "max_output_tokens"
+    assert resp.completed_at is None
 
 
 def test_function_call_arguments_deltas_attributed_to_function_item():

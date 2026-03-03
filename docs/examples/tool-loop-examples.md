@@ -86,3 +86,5 @@ final_response = client.responses.create(
 print(final_response.output[0].content)
 # "The weather in Boston is 22°C and sunny."
 ```
+
+For MCP examples, see [MCP Examples](hosted-mcp-examples.md).

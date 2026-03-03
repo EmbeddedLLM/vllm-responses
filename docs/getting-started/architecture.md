@@ -4,7 +4,7 @@ Understand how `vLLM Responses` bridges the gap between the OpenAI Responses API
 
 ## Overview
 
-At its core, `vLLM Responses` is a translation layer (or "gateway"). It sits between your client application and your vLLM inference server, adding statefulness, built-in tool execution, and spec-compliant streaming.
+At its core, `vLLM Responses` is a translation layer (or "gateway"). It sits between your client application and your vLLM inference server, adding statefulness, built-in tool execution, MCP integration (Built-in MCP and Remote MCP), and spec-compliant streaming.
 
 ```mermaid
 sequenceDiagram
@@ -13,6 +13,7 @@ sequenceDiagram
     participant DB as ResponseStore<br/>(Database)
     participant vLLM as vLLM Server
     participant CI as Code Interpreter<br/>Runtime
+    participant MCP as MCP Runtime/Server<br/>(Built-in/Remote)
 
     Client->>Gateway: POST /v1/responses<br/>(with previous_response_id)
     Gateway->>DB: Load conversation history
@@ -27,6 +28,13 @@ sequenceDiagram
         vLLM-->>Gateway: Final response
     end
 
+    opt If model requests MCP tool
+        Gateway->>MCP: Execute tool call
+        MCP-->>Gateway: Tool output/error
+        Gateway->>vLLM: Continue with MCP result
+        vLLM-->>Gateway: Final response
+    end
+
     Gateway-->>Client: SSE: Responses events
     Gateway->>DB: Store response state
 ```
@@ -38,12 +46,12 @@ sequenceDiagram
 1. **Gateway** transforms the Responses request into a Chat Completions request and sends it to **vLLM** with the full conversation history.
 1. **vLLM** generates tokens and streams them back to the gateway as Chat Completions chunks.
 1. **Gateway** normalizes vLLM output into a stable internal event stream and composes spec-compliant Responses SSE events.
-1. If the model requests a **built-in tool** (like Code Interpreter):
-    - The gateway executes the tool in a sandboxed runtime.
+1. If the model requests a **gateway-executed tool** (for example Code Interpreter or an MCP tool):
+    - The gateway executes the tool call (locally for built-ins, or via Built-in MCP / Remote MCP transport).
     - Results are fed back to vLLM to continue generation.
     - All of this happens within a single API request.
 1. **Gateway** streams Responses events back to the client in real-time.
-1. **Gateway** persists the final response state to the database for future `previous_response_id` lookups.
+1. **Gateway** persists terminal storable response state (`completed` and `incomplete`, when `store=true`) to the database for future `previous_response_id` lookups.
 
 ______________________________________________________________________
 
@@ -67,3 +75,7 @@ This significantly reduces bandwidth and complexity for client applications.
 ### Built-in Tools
 
 The gateway includes a runtime for **built-in tools**. The primary example is the **Code Interpreter**. When the model decides to write code, the gateway executes it in a secure, sandboxed environment and returns the results—all within a single API request lifecycle.
+
+### MCP Integration
+
+The gateway can execute MCP tools declared in the request. Built-in MCP uses configured `server_label` inventory via a singleton internal runtime process shared by gateway workers; Remote MCP uses request `server_url`. Both stay in the same Responses lifecycle with consistent `mcp_call` events and output items.

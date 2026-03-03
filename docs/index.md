@@ -16,6 +16,7 @@ ______________________________________________________________________
 
 - **Stateful Conversations**: Maintain conversation history automatically using `previous_response_id`, backed by a persistent store (SQLite/Postgres).
 - **Built-in Code Interpreter**: Let the model write and execute code in a sandboxed environment on the gateway.
+- **MCP Integration (Built-in MCP + Remote MCP)**: Use configured Built-in MCP servers or Remote MCP declarations with Responses-style streaming events.
 - **Correct SSE Streaming**: Receive spec-compliant Server-Sent Events with precise ordering and shape guarantees.
 - **Drop-in Compatibility**: Works with any standard vLLM OpenAI-compatible endpoint.
 
@@ -36,10 +37,10 @@ ______________________________________________________________________
 ## Documentation Map
 
 - **[Usage](usage/command-reference.md)**: CLI reference and streaming guide.
-- **[Features](features/statefulness.md)**: Deep dive into statefulness, custom tools, and the code interpreter.
+- **[Features](features/statefulness.md)**: Deep dive into statefulness, built-in tools, and MCP integration.
 - **[Reference](reference/api-reference.md)**: API endpoint details, configuration variables, and event schemas.
 - **[Deployment](deployment/configuration.md)**: Production configuration.
-- **[Examples](examples/code-interpreter-examples.md)**: Code snippets for common scenarios.
+- **[Examples](examples/code-interpreter-examples.md)**: Code snippets for code interpreter, MCP usage, and tool loops.
 
 ______________________________________________________________________
 

@@ -39,6 +39,42 @@ Notes:
 - `2+` enables parallel execution via Bun Workers (experimental).
 - Each worker initializes its own Pyodide runtime, so RAM usage and startup time scale with worker count.
 
+## MCP Configuration (Built-in + Remote)
+
+| Variable                                  | Description                                                                                          | Default |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------- |
+| **`VTOL_MCP_CONFIG_PATH`**                | Path to Built-in MCP runtime JSON configuration file.                                                | unset   |
+| **`VTOL_MCP_BUILTIN_RUNTIME_URL`**        | Loopback base URL for the singleton Built-in MCP runtime (`serve` default: `http://127.0.0.1:5981`). | unset   |
+| **`VTOL_MCP_REQUEST_REMOTE_ENABLED`**     | Enable Remote MCP (`tools[].mcp.server_url`) handling.                                               | `True`  |
+| **`VTOL_MCP_REQUEST_REMOTE_URL_CHECKS`**  | Enable Remote MCP URL policy checks (`https`, denylist hosts).                                       | `True`  |
+| **`VTOL_MCP_HOSTED_STARTUP_TIMEOUT_SEC`** | Built-in MCP startup/discovery timeout in seconds (applies to all hosted servers).                   | `10`    |
+| **`VTOL_MCP_HOSTED_TOOL_TIMEOUT_SEC`**    | Built-in MCP call timeout in seconds (applies to all hosted servers).                                | `60`    |
+
+If `VTOL_MCP_CONFIG_PATH` is unset, Built-in MCP is disabled.
+Built-in MCP is designed for `vllm-responses serve`, which starts a singleton runtime and injects `VTOL_MCP_BUILTIN_RUNTIME_URL` for gateway workers.
+In normal `serve` usage, leave `VTOL_MCP_BUILTIN_RUNTIME_URL` unset to use `http://127.0.0.1:5981`.
+Set it only when you need a different loopback port (for example, local port clashes) or when manually wiring gateway workers to an externally managed runtime.
+If `VTOL_MCP_REQUEST_REMOTE_ENABLED=false`, Remote MCP declarations are rejected while Built-in MCP remains available.
+If `VTOL_MCP_REQUEST_REMOTE_URL_CHECKS=false`, gateway URL policy checks are fully disabled for Remote MCP declarations.
+
+For the canonical `mcp.json` examples (URL + stdio styles), see
+[MCP Examples -> Built-in MCP Runtime Config](../examples/hosted-mcp-examples.md#built-in-mcp-runtime-config-mcpjson).
+
+Notes:
+
+- Labels under `mcpServers` are request-visible `server_label` values.
+- Built-in MCP supports two server entry shapes:
+    - URL-based HTTP: `url` (required, accepts `http://` or `https://`), `headers` (optional), `transport` (optional).
+    - Command-style stdio: `command` (required), `args`/`env`/`cwd` (optional), `transport` optional but only `"stdio"`.
+- Nested `transport` objects are rejected (for example, `"transport": {"type":"stdio", ...}`).
+- `transport: "stdio"` without command-style keys is rejected.
+- Mixing HTTP and stdio keys in one entry (for example `command` + `url`) is rejected.
+- Hosted startup and tool timeouts are configured globally with:
+    - `VTOL_MCP_HOSTED_STARTUP_TIMEOUT_SEC`
+    - `VTOL_MCP_HOSTED_TOOL_TIMEOUT_SEC`
+- Unknown non-runtime server fields are forwarded to FastMCP.
+- In `serve` mode, `VTOL_MCP_BUILTIN_RUNTIME_URL` must be loopback `http://127.0.0.1:<port>` (or `http://localhost:<port>`), with no path/query/fragment.
+
 ## Observability Configuration
 
 | Variable                        | Description                                                           | Default          |
@@ -68,4 +104,10 @@ export VTOL_DB_PATH="postgresql+asyncpg://user:pass@db-host:5432/vtol"
 export VTOL_WORKERS=8
 export VTOL_RESPONSE_STORE_CACHE=1
 export VTOL_REDIS_HOST="redis-host"
+```
+
+### Enable Built-in MCP
+
+```bash
+--8<-- "snippets/mcp_enable_config_env.txt"
 ```

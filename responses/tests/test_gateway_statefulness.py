@@ -4,7 +4,7 @@ import httpx
 import pytest
 from sse_test_utils import extract_completed_response, parse_sse_frames, parse_sse_json_events
 
-from vtol.entrypoints import llm as mock_llm
+from vllm_responses.entrypoints import llm as mock_llm
 
 
 def _extract_completed_response(sse_text: str) -> dict:
@@ -26,7 +26,7 @@ async def test_previous_response_id_statefulness_across_requests(
 ):
     # We replay two upstream chat completion streams deterministically; the main point here is
     # to validate that the gateway's shared ResponseStore enables `previous_response_id` hydration.
-    mock_llm.app.state.vtol.cassette_replayer = cassette_replayer_factory(
+    mock_llm.app.state.vllm_responses.cassette_replayer = cassette_replayer_factory(
         "text-single-stream.yaml",
         "text-single-stream.yaml",
     )
@@ -70,7 +70,7 @@ async def test_previous_response_id_custom_function_tool_loop_omit_tools(
     gateway_client: httpx.AsyncClient,
     cassette_replayer_factory,
 ):
-    mock_llm.app.state.vtol.cassette_replayer = cassette_replayer_factory(
+    mock_llm.app.state.vllm_responses.cassette_replayer = cassette_replayer_factory(
         "vllm-code_interpreter-step1-stream.yaml",
         "vllm-code_interpreter-step2-stream.yaml",
     )

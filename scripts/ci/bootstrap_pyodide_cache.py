@@ -11,7 +11,7 @@ VERSION_MARKER = ".pyodide_version"
 
 
 def _default_cache_dir() -> Path:
-    override = os.environ.get("VTOL_PYODIDE_CACHE_DIR", "").strip()
+    override = os.environ.get("VR_PYODIDE_CACHE_DIR", "").strip()
     if override:
         return Path(os.path.expanduser(override))
     xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument(
         "--seed-tarball",
         type=str,
-        default=os.environ.get("VTOL_PYODIDE_SEED_TARBALL", "").strip() or None,
+        default=os.environ.get("VR_PYODIDE_SEED_TARBALL", "").strip() or None,
         help="Optional local pyodide-<version>.tar.bz2 to use instead of downloading.",
     )
     args = parser.parse_args()

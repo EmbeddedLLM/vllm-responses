@@ -11,7 +11,7 @@ The Responses API introduces **Statefulness** via the `previous_response_id` par
 ## How It Works
 
 1. **Initial Request**: You send a request with your initial input (e.g., a user message).
-1. **Storage**: The gateway generates a response and stores the _entire conversation context_ (including your input and its output) in its database.
+1. **Storage**: The gateway generates a response and stores the _entire conversation context_ (including your input and its output) in its database for final responses (`completed` and `incomplete`, when `store=true`).
 1. **Continuation**: When you want to reply, you send _only_ your new input and the `previous_response_id` from the last response.
 1. **Rehydration**: The gateway looks up the previous response, reconstructs the full history, and sends it to the model.
 
@@ -61,3 +61,4 @@ See [Configuration Reference](../reference/configuration.md) and [Configuration 
 - **Capability-Based Access**: The `response_id` acts as a capability token. Anyone who possesses the ID can continue the conversation. Treat these IDs as secrets (like session tokens).
 - **Persistence**: By default, responses are stored indefinitely (or until an expiration policy is configured/implemented).
 - **`store` Parameter**: You can control whether a response is stored using the `store` parameter (default: `true`). If `store=false`, the response cannot be used as a `previous_response_id` later.
+- **Terminal Statuses**: Stored terminal responses include both `completed` and `incomplete`. Non-terminal and failed states are not continuation anchors.
