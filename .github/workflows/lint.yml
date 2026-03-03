@@ -87,7 +87,7 @@ jobs:
         run: |
           # --no-validate allows files with complex MkDocs syntax to be checked
           # Some files with advanced admonitions may fail strict HTML validation
-          uv run --no-sync mdformat --check --no-validate ../docs/ ../design_docs/ || (echo "Run 'cd responses && uv sync --active --extra lint' then 'uv run mdformat ../docs/ ../design_docs/' locally to fix" && exit 1)
+          uv run --no-sync mdformat --check --no-validate ../docs/ || (echo "Run 'cd responses && uv sync --active --extra lint' then 'uv run mdformat ../docs/' locally to fix" && exit 1)
 
   markdown_lint:
     name: Markdown Lint (markdownlint-cli)
@@ -103,4 +103,4 @@ jobs:
           node-version: 24
 
       - name: Lint Markdown files
-        run: npx markdownlint-cli@0.47.0 docs/ design_docs/
+        run: npx markdownlint-cli@0.47.0 docs/
