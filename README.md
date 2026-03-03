@@ -9,7 +9,7 @@ FastAPI gateway that exposes an OpenAI-style **Responses API** (`/v1/responses`)
 
 Current MCP boundary:
 
-- `tools[].type="mcp"` is gateway-hosted MCP resolved via `VTOL_MCP_CONFIG_PATH`.
+- `tools[].type="mcp"` is gateway-hosted MCP resolved via `VR_MCP_CONFIG_PATH`.
 - Request-declared MCP targets (`server_url`, `connector_id`) are not supported yet.
 
 **[📚 Full User Documentation](https://embeddedllm.github.io/vllm-responses/)** (Guides, API Reference, Examples)
@@ -47,9 +47,9 @@ uv pip install -e ./responses
 
 # Development: enable Code Interpreter via Bun fallback
 # - Required for source checkouts when running with `code_interpreter` enabled (default)
-cd responses/python/vtol/tools/code_interpreter
+cd responses/python/vllm_responses/tools/code_interpreter
 bun install
-export VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1
+export VR_CODE_INTERPRETER_DEV_BUN_FALLBACK=1
 cd -
 
 vllm-responses --help
@@ -74,7 +74,7 @@ Available extras:
 - `docs`: MkDocs toolchain (contributors).
 - `lint`: Ruff + Markdown formatting.
 - `test`: Pytest + coverage + load testing tools.
-- `tracing`: OpenTelemetry tracing support (only needed if you enable `VTOL_TRACING_ENABLED=true`).
+- `tracing`: OpenTelemetry tracing support (only needed if you enable `VR_TRACING_ENABLED=true`).
 - `build`: Package build/publish tools.
 - `all`: Everything above.
 
@@ -86,10 +86,10 @@ Prereqs:
 
 - If you want to spawn vLLM: `vllm` must be installed (e.g. `uv pip install vllm`).
 - If `code_interpreter` is enabled (default), the first start may download the Pyodide runtime (~400MB) into a cache
-    directory (see `VTOL_PYODIDE_CACHE_DIR`). This requires `tar` to be installed.
+    directory (see `VR_PYODIDE_CACHE_DIR`). This requires `tar` to be installed.
 - For non-Linux platforms (or source installs without the bundled binary), you can disable the tool via
     `--code-interpreter disabled`. For development you can also enable the Bun-based fallback via
-    `VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`.
+    `VR_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`.
 
 External upstream (you start vLLM yourself; `/v1` is optional):
 
@@ -120,12 +120,12 @@ Remote access note:
 
 Env vars (default off):
 
-- `VTOL_RESPONSE_STORE_CACHE=1`
-- `VTOL_RESPONSE_STORE_CACHE_TTL_SECONDS=3600`
+- `VR_RESPONSE_STORE_CACHE=1`
+- `VR_RESPONSE_STORE_CACHE_TTL_SECONDS=3600`
 
 Redis connection:
 
-- `VTOL_REDIS_HOST`, `VTOL_REDIS_PORT`
+- `VR_REDIS_HOST`, `VR_REDIS_PORT`
 
 ## Quick smoke test (OpenAI Python SDK)
 

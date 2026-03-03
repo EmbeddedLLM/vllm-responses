@@ -16,11 +16,11 @@ The gateway exposes operational data through:
 
 The metrics endpoint is unauthenticated and available at:
 
-- **Endpoint**: `GET /metrics` (configurable via `VTOL_METRICS_PATH`)
+- **Endpoint**: `GET /metrics` (configurable via `VR_METRICS_PATH`)
 - **Port**: Same as gateway (default `5969`)
 - **Format**: Prometheus text exposition format
 
-If you change `VTOL_METRICS_PATH`, update your Prometheus `metrics_path` accordingly.
+If you change `VR_METRICS_PATH`, update your Prometheus `metrics_path` accordingly.
 
 Example Prometheus `scrape_configs`:
 
@@ -122,17 +122,17 @@ Set the following environment variables:
 
 ```bash
 # Enable tracing
-export VTOL_TRACING_ENABLED=true
+export VR_TRACING_ENABLED=true
 
 # Sampling ratio (0.0 to 1.0)
-export VTOL_TRACING_SAMPLE_RATIO=0.01
+export VR_TRACING_SAMPLE_RATIO=0.01
 
 # OTLP endpoint (gRPC)
-export VTOL_OPENTELEMETRY_HOST=otel-collector
-export VTOL_OPENTELEMETRY_PORT=4317
+export VR_OPENTELEMETRY_HOST=otel-collector
+export VR_OPENTELEMETRY_PORT=4317
 
 # Service name in traces
-export VTOL_OTEL_SERVICE_NAME=vtol-gateway
+export VR_OTEL_SERVICE_NAME=vtol-gateway
 ```
 
 ### What Gets Traced

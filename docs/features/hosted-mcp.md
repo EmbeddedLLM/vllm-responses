@@ -22,7 +22,7 @@ This page focuses on Built-in MCP setup and call flow, then summarizes Remote MC
 
 ## Prerequisites
 
-1. Configure MCP runtime servers via `VTOL_MCP_CONFIG_PATH`.
+1. Configure MCP runtime servers via `VR_MCP_CONFIG_PATH`.
 1. Ensure the target `server_label` is available (`GET /v1/mcp/servers`).
 1. Start the gateway with `vllm-responses serve` so the singleton Built-in MCP runtime is launched.
 
@@ -108,7 +108,7 @@ See [Events Reference](../reference/events.md) for payload details.
 ## Remote MCP Mode Notes
 
 - Built-in MCP requests reference configured servers by `server_label` only.
-- Remote MCP via request `server_url` does not require server registration in `VTOL_MCP_CONFIG_PATH`.
+- Remote MCP via request `server_url` does not require server registration in `VR_MCP_CONFIG_PATH`.
 - Remote MCP transport selection is delegated to FastMCP from request `server_url` and headers.
 - `require_approval` currently supports `never` only.
 - Remote MCP host policy rejects `localhost`, `*.localhost`, and IP-literal hosts, and only `https` is accepted.

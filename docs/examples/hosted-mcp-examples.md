@@ -4,7 +4,7 @@ Use MCP tools through the Responses API in either Built-in MCP mode or Remote MC
 
 ## Built-in MCP Runtime Config (`mcp.json`)
 
-Set `VTOL_MCP_CONFIG_PATH` to point to an MCP runtime config file:
+Set `VR_MCP_CONFIG_PATH` to point to an MCP runtime config file:
 
 ```bash
 --8<-- "snippets/mcp_enable_config_env.txt"
@@ -21,7 +21,7 @@ Canonical example (`url` + `stdio` styles):
 
 Before sending tool requests, inspect runtime availability:
 
-Set `VTOL_MCP_CONFIG_PATH` and start with `vllm-responses serve` so the singleton Built-in MCP runtime is active.
+Set `VR_MCP_CONFIG_PATH` and start with `vllm-responses serve` so the singleton Built-in MCP runtime is active.
 
 ```bash
 --8<-- "snippets/mcp_discover_servers_tools_curl.txt"

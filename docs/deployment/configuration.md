@@ -31,7 +31,7 @@ Zero-configuration storage using a local SQLite database file.
 **Characteristics:**
 
 - Zero setup required
-- Single file database (`vtol.db`)
+- Single file database (`vllm_responses.db`)
 - Works with multiple workers on the same machine (uses WAL mode)
 - Does NOT work across multiple machines
 
@@ -40,13 +40,13 @@ Zero-configuration storage using a local SQLite database file.
 Required for multi-machine deployments and high-availability scenarios.
 
 ```bash
-export VTOL_DB_PATH="postgresql+asyncpg://user:password@db-host:5432/vtol"
+export VR_DB_PATH="postgresql+asyncpg://user:password@db-host:5432/vllm_responses"
 --8<-- "snippets/serve_external_upstream_cmd.txt"
 ```
 
 **Migration notes:** When moving from SQLite to PostgreSQL:
 
-1. Set `VTOL_DB_PATH` to your PostgreSQL connection string
+1. Set `VR_DB_PATH` to your PostgreSQL connection string
 1. Restart the gateway - tables will be created automatically
 1. Existing SQLite data will NOT be migrated
 
@@ -98,10 +98,10 @@ Add Redis caching to reduce database load for `previous_response_id` lookups.
 ### Configuration
 
 ```bash
-export VTOL_RESPONSE_STORE_CACHE=1
-export VTOL_REDIS_HOST=localhost
-export VTOL_REDIS_PORT=6379
-export VTOL_RESPONSE_STORE_CACHE_TTL_SECONDS=3600  # 1 hour
+export VR_RESPONSE_STORE_CACHE=1
+export VR_REDIS_HOST=localhost
+export VR_REDIS_PORT=6379
+export VR_RESPONSE_STORE_CACHE_TTL_SECONDS=3600  # 1 hour
 
 --8<-- "snippets/serve_external_upstream_cmd.txt"
 ```
@@ -120,7 +120,7 @@ ______________________________________________________________________
 
 ## MCP Configuration (Optional)
 
-Enable Built-in MCP by providing a runtime config file and setting `VTOL_MCP_CONFIG_PATH`.
+Enable Built-in MCP by providing a runtime config file and setting `VR_MCP_CONFIG_PATH`.
 
 ### Minimal Setup
 
@@ -134,12 +134,12 @@ For `mcp.json` examples (URL + stdio styles), see
 
 ### Operational Notes
 
-- If `VTOL_MCP_CONFIG_PATH` is unset, Built-in MCP is disabled.
+- If `VR_MCP_CONFIG_PATH` is unset, Built-in MCP is disabled.
 - With `vllm-responses serve`, Built-in MCP runs in a singleton internal runtime process shared by all gateway workers.
-- The supervisor injects `VTOL_MCP_BUILTIN_RUNTIME_URL` for gateway workers automatically.
+- The supervisor injects `VR_MCP_BUILTIN_RUNTIME_URL` for gateway workers automatically.
 - Built-in MCP startup and call timeouts are configured globally:
-    - `VTOL_MCP_HOSTED_STARTUP_TIMEOUT_SEC`
-    - `VTOL_MCP_HOSTED_TOOL_TIMEOUT_SEC`
+    - `VR_MCP_HOSTED_STARTUP_TIMEOUT_SEC`
+    - `VR_MCP_HOSTED_TOOL_TIMEOUT_SEC`
 - Runtime discovery endpoints:
     - `GET /v1/mcp/servers`
     - `GET /v1/mcp/servers/{server_label}/tools`
@@ -149,7 +149,7 @@ For `mcp.json` examples (URL + stdio styles), see
 Remote MCP declarations (`tools[].type="mcp"` with `server_url`) are enabled by default.
 
 ```bash
-export VTOL_MCP_REQUEST_REMOTE_ENABLED=false
+export VR_MCP_REQUEST_REMOTE_ENABLED=false
 ```
 
 When disabled, any Remote MCP declaration is rejected as a request-level policy error. Built-in MCP mode is unaffected.
@@ -159,13 +159,13 @@ When disabled, any Remote MCP declaration is rejected as a request-level policy 
 Gateway URL policy checks for Remote MCP are enabled by default.
 
 ```bash
-export VTOL_MCP_REQUEST_REMOTE_URL_CHECKS=true
+export VR_MCP_REQUEST_REMOTE_URL_CHECKS=true
 ```
 
 Set to `false` to bypass gateway-side URL validation checks.
 
 ```bash
-export VTOL_MCP_REQUEST_REMOTE_URL_CHECKS=false
+export VR_MCP_REQUEST_REMOTE_URL_CHECKS=false
 ```
 
 Warning: disabling URL checks increases SSRF and unsafe-endpoint risk and should only be used in tightly controlled environments.
@@ -187,7 +187,7 @@ vllm-responses serve -- meta-llama/Llama-3.2-3B-Instruct --port 8457
 - vLLM subprocess
 - Gateway (1+ workers)
 - Code interpreter subprocess
-- Built-in MCP integration (optional, when `VTOL_MCP_CONFIG_PATH` is set)
+- Built-in MCP integration (optional, when `VR_MCP_CONFIG_PATH` is set)
     - runs as a singleton loopback runtime process shared by all gateway workers
 
 ### Disaggregated
@@ -216,15 +216,15 @@ ______________________________________________________________________
 
 ## Configuration Quick Reference
 
-| Configuration             | Command/Environment                               |
-| ------------------------- | ------------------------------------------------- |
-| **Database (PostgreSQL)** | `export VTOL_DB_PATH="postgresql+asyncpg://..."`  |
-| **Multiple workers**      | `--gateway-workers 4`                             |
-| **Redis cache**           | `export VTOL_RESPONSE_STORE_CACHE=1`              |
-| **Built-in MCP config**   | `export VTOL_MCP_CONFIG_PATH="/path/mcp.json"`    |
-| **Remote MCP**            | `export VTOL_MCP_REQUEST_REMOTE_ENABLED=false`    |
-| **Remote URL checks**     | `export VTOL_MCP_REQUEST_REMOTE_URL_CHECKS=false` |
-| **External vLLM**         | `--upstream http://vllm:8000`                     |
+| Configuration             | Command/Environment                             |
+| ------------------------- | ----------------------------------------------- |
+| **Database (PostgreSQL)** | `export VR_DB_PATH="postgresql+asyncpg://..."`  |
+| **Multiple workers**      | `--gateway-workers 4`                           |
+| **Redis cache**           | `export VR_RESPONSE_STORE_CACHE=1`              |
+| **Built-in MCP config**   | `export VR_MCP_CONFIG_PATH="/path/mcp.json"`    |
+| **Remote MCP**            | `export VR_MCP_REQUEST_REMOTE_ENABLED=false`    |
+| **Remote URL checks**     | `export VR_MCP_REQUEST_REMOTE_URL_CHECKS=false` |
+| **External vLLM**         | `--upstream http://vllm:8000`                   |
 
 ______________________________________________________________________
 

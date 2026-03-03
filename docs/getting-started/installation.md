@@ -48,9 +48,9 @@ uv venv --python=3.12
 source .venv/bin/activate
 uv pip install -e ./responses
 
-cd responses/python/vtol/tools/code_interpreter
+cd responses/python/vllm_responses/tools/code_interpreter
 bun install
-export VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1
+export VR_CODE_INTERPRETER_DEV_BUN_FALLBACK=1
 cd -
 
 vllm-responses --help
@@ -62,7 +62,7 @@ If `code_interpreter` is enabled (default), the first start may download the Pyo
 directory and extract it. Subsequent starts reuse the cache.
 
 - Default cache: `${XDG_CACHE_HOME:-$HOME/.cache}/vllm-responses/pyodide`
-- Override: set `VTOL_PYODIDE_CACHE_DIR` to a persistent directory with enough free disk space.
+- Override: set `VR_PYODIDE_CACHE_DIR` to a persistent directory with enough free disk space.
 
 ## Optional dependency sets
 
@@ -70,7 +70,7 @@ Some features require additional optional dependencies.
 
 ### OpenTelemetry tracing (optional)
 
-If you want to enable OpenTelemetry tracing (`VTOL_TRACING_ENABLED=true`), install with the `tracing` extra.
+If you want to enable OpenTelemetry tracing (`VR_TRACING_ENABLED=true`), install with the `tracing` extra.
 
 ### Documentation toolchain (contributors)
 

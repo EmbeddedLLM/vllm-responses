@@ -138,8 +138,8 @@ MCP request validation rules include:
 - Duplicate MCP declarations for the same `server_label` are rejected (including Built-in MCP / Remote MCP cross-mode duplicates).
 - Hosted `server_label` values must reference available configured servers.
 - Remote MCP URL checks are enabled by default and enforce `https` plus denylist host policy (`localhost`, `*.localhost`, IP-literal hosts).
-- Remote MCP URL checks can be disabled by setting `VTOL_MCP_REQUEST_REMOTE_URL_CHECKS=false`.
-- Remote MCP execution can be disabled by `VTOL_MCP_REQUEST_REMOTE_ENABLED=false`.
+- Remote MCP URL checks can be disabled by setting `VR_MCP_REQUEST_REMOTE_URL_CHECKS=false`.
+- Remote MCP execution can be disabled by `VR_MCP_REQUEST_REMOTE_ENABLED=false`.
 - Remote MCP transport selection is delegated to FastMCP from request `server_url` and request headers.
 - The gateway does not perform its own transport inference metadata/fallback logic for Remote MCP declarations.
 - Function tool names starting with `mcp__` are reserved and rejected.

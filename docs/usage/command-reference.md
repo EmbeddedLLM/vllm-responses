@@ -18,7 +18,7 @@ The `vllm-responses serve` command acts as a supervisor. It can run in two prima
 It also manages:
 
 1. the **Code Interpreter** runtime (unless disabled),
-1. the singleton **Built-in MCP** runtime process (when `VTOL_MCP_CONFIG_PATH` is set).
+1. the singleton **Built-in MCP** runtime process (when `VR_MCP_CONFIG_PATH` is set).
 
 ______________________________________________________________________
 
@@ -38,15 +38,15 @@ These options control the `vllm-responses` server itself.
 
 #### `--gateway-host HOST`
 
-**Description**: The interface to bind the gateway server to. **Default**: `0.0.0.0` (See `VTOL_HOST`)
+**Description**: The interface to bind the gateway server to. **Default**: `0.0.0.0` (See `VR_HOST`)
 
 #### `--gateway-port PORT`
 
-**Description**: The port to listen on. **Default**: `5969` (See `VTOL_PORT`)
+**Description**: The port to listen on. **Default**: `5969` (See `VR_PORT`)
 
 #### `--gateway-workers N`
 
-**Description**: Number of Gunicorn workers to spawn. **Default**: `1` (See `VTOL_WORKERS`) **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
+**Description**: Number of Gunicorn workers to spawn. **Default**: `1` (See `VR_WORKERS`) **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
 
 ### vLLM Spawning
 
@@ -73,7 +73,7 @@ These options apply only when **not** using `--upstream`. Everything after `--` 
 !!! note "Developer-only fallback"
 
     On platforms without a bundled Code Interpreter binary (or when running from a source checkout), you can allow a
-    Bun-based fallback by setting `VTOL_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`. This is intended for development.
+    Bun-based fallback by setting `VR_CODE_INTERPRETER_DEV_BUN_FALLBACK=1`. This is intended for development.
 
 #### `--code-interpreter-port PORT`
 
@@ -108,17 +108,17 @@ For scalar values (ports, workers, timeouts), precedence is presence-based:
 
 Built-in MCP runtime configuration is environment-only in this command:
 
-- Set `VTOL_MCP_CONFIG_PATH=/path/to/mcp.json` to enable Built-in MCP.
+- Set `VR_MCP_CONFIG_PATH=/path/to/mcp.json` to enable Built-in MCP.
 - There is currently no dedicated `serve` CLI flag for MCP config path.
-- `VTOL_MCP_BUILTIN_RUNTIME_URL` is the single runtime-address knob (default `http://127.0.0.1:5981` when unset).
-- When enabled, `serve` starts one loopback Built-in MCP runtime and injects `VTOL_MCP_BUILTIN_RUNTIME_URL` into gateway workers.
-- Set `VTOL_MCP_BUILTIN_RUNTIME_URL` only when you need a different loopback port/host in `serve`, or when manually wiring workers to a separately managed runtime.
+- `VR_MCP_BUILTIN_RUNTIME_URL` is the single runtime-address knob (default `http://127.0.0.1:5981` when unset).
+- When enabled, `serve` starts one loopback Built-in MCP runtime and injects `VR_MCP_BUILTIN_RUNTIME_URL` into gateway workers.
+- Set `VR_MCP_BUILTIN_RUNTIME_URL` only when you need a different loopback port/host in `serve`, or when manually wiring workers to a separately managed runtime.
 
 Upstream selection precedence:
 
 1. `--upstream` (external upstream; `/v1` normalized). Error if used together with `--`.
-1. `-- <vllm args...>` (spawn vLLM; ignores `VTOL_LLM_API_BASE` with a notice).
-1. `VTOL_LLM_API_BASE` (external upstream from env / `.env`).
+1. `-- <vllm args...>` (spawn vLLM; ignores `VR_LLM_API_BASE` with a notice).
+1. `VR_LLM_API_BASE` (external upstream from env / `.env`).
 1. Otherwise: configuration error ("no upstream configured").
 
 ## Examples

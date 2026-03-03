@@ -54,19 +54,19 @@ ______________________________________________________________________
 
 While CLI flags are the primary way to configure the gateway, you can also use environment variables.
 
-| CLI Flag            | Environment Variable                 | Description                                 |
-| ------------------- | ------------------------------------ | ------------------------------------------- |
-| `--upstream`        | `VTOL_LLM_API_BASE`                  | Upstream vLLM URL                           |
-| `--gateway-host`    | `VTOL_HOST`                          | Bind host                                   |
-| `--gateway-port`    | `VTOL_PORT`                          | Bind port                                   |
-| `--gateway-workers` | `VTOL_WORKERS`                       | Number of workers                           |
-| (env only)          | `VTOL_MCP_CONFIG_PATH`               | Built-in MCP runtime config path            |
-| (env only)          | `VTOL_MCP_BUILTIN_RUNTIME_URL`       | Singleton Built-in MCP runtime loopback URL |
-| (env only)          | `VTOL_MCP_REQUEST_REMOTE_ENABLED`    | Enable/disable Remote MCP declarations      |
-| (env only)          | `VTOL_MCP_REQUEST_REMOTE_URL_CHECKS` | Enable/disable Remote MCP URL policy checks |
+| CLI Flag            | Environment Variable               | Description                                 |
+| ------------------- | ---------------------------------- | ------------------------------------------- |
+| `--upstream`        | `VR_LLM_API_BASE`                  | Upstream vLLM URL                           |
+| `--gateway-host`    | `VR_HOST`                          | Bind host                                   |
+| `--gateway-port`    | `VR_PORT`                          | Bind port                                   |
+| `--gateway-workers` | `VR_WORKERS`                       | Number of workers                           |
+| (env only)          | `VR_MCP_CONFIG_PATH`               | Built-in MCP runtime config path            |
+| (env only)          | `VR_MCP_BUILTIN_RUNTIME_URL`       | Singleton Built-in MCP runtime loopback URL |
+| (env only)          | `VR_MCP_REQUEST_REMOTE_ENABLED`    | Enable/disable Remote MCP declarations      |
+| (env only)          | `VR_MCP_REQUEST_REMOTE_URL_CHECKS` | Enable/disable Remote MCP URL policy checks |
 
-When `VTOL_MCP_CONFIG_PATH` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
-If `VTOL_MCP_BUILTIN_RUNTIME_URL` is unset, `serve` uses `http://127.0.0.1:5981`.
+When `VR_MCP_CONFIG_PATH` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
+If `VR_MCP_BUILTIN_RUNTIME_URL` is unset, `serve` uses `http://127.0.0.1:5981`.
 Set it only when you need a different loopback runtime address (for example, local port clashes) or when manually wiring workers to a separately managed runtime.
 
 See [Configuration Reference](../reference/configuration.md) for a complete list.

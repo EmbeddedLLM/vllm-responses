@@ -89,7 +89,7 @@ data: {"response":{...}}
 
 ## 4. Optional: MCP Smoke Test (Built-in MCP)
 
-If you enabled Built-in MCP (configured `VTOL_MCP_CONFIG_PATH` and a server label/tool), you can run a minimal forced tool call.
+If you enabled Built-in MCP (configured `VR_MCP_CONFIG_PATH` and a server label/tool), you can run a minimal forced tool call.
 
 Need the Built-in MCP `mcp.json` format first? See:
 

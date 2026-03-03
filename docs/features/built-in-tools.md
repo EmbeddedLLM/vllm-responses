@@ -82,12 +82,12 @@ The code interpreter runs in a sandboxed environment:
 !!! note "First start download"
 
     If the tool is enabled, the first start may download the Pyodide runtime (~400MB) into a cache directory and extract
-    it. You can control the cache location via `VTOL_PYODIDE_CACHE_DIR`.
+    it. You can control the cache location via `VR_PYODIDE_CACHE_DIR`.
 
 !!! note "Concurrency"
 
     If you need more code-interpreter throughput, you can configure a worker pool for the Code Interpreter service via
-    `VTOL_CODE_INTERPRETER_WORKERS` (or `--code-interpreter-workers` under `vllm-responses serve`). This uses [Bun
+    `VR_CODE_INTERPRETER_WORKERS` (or `--code-interpreter-workers` under `vllm-responses serve`). This uses [Bun
     Workers **experimental**](https://bun.com/docs/runtime/workers). Use `2+` for actual parallelism; `1` enables
     worker mode but does not increase throughput. Each worker loads its own Pyodide runtime, so higher worker counts
     increase RAM usage and startup time.

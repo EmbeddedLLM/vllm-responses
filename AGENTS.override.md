@@ -348,7 +348,7 @@ This section captures compact project knowledge for execution efficiency and sho
 
 ### 12.2 Core Architecture (Current)
 
-- Runtime package root: `responses/python/vtol/`.
+- Runtime package root: `responses/python/vllm_responses/`.
 - Request flow: Router -> `LMEngine` -> `responses_core` pipeline.
 - `responses_core` layers:
   - `normalizer.py`: `pydantic_ai` events -> internal normalized events.
@@ -382,7 +382,7 @@ This section captures compact project knowledge for execution efficiency and sho
 - Code interpreter modes:
   - `spawn`, `external`, `disabled`.
 - Multi-worker safety:
-  - Supervisor initializes DB schema once and exports `VTOL_DB_SCHEMA_READY=1`.
+  - Supervisor initializes DB schema once and exports `VR_DB_SCHEMA_READY=1`.
 
 ### 12.5 Stateful Semantics (Current Policy)
 
@@ -423,7 +423,7 @@ This section captures compact project knowledge for execution efficiency and sho
 - Maintainer architecture/decisions: `design_docs/`.
 - Packaging/runtime specifics: `responses/pyproject.toml`, `responses/setup.py`, `responses/MANIFEST.in`.
 - Core implementation files:
-  - `responses/python/vtol/lm.py`
-  - `responses/python/vtol/routers/serving.py`
-  - `responses/python/vtol/responses_core/*`
-  - `responses/python/vtol/tools/code_interpreter/*`
+  - `responses/python/vllm_responses/lm.py`
+  - `responses/python/vllm_responses/routers/serving.py`
+  - `responses/python/vllm_responses/responses_core/*`
+  - `responses/python/vllm_responses/tools/code_interpreter/*`
