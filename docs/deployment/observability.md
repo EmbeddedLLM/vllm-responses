@@ -57,34 +57,34 @@ We intentionally do not document manual multi-worker ASGI server setups here (Gu
 
 ### Available Metrics
 
-All metrics use the `vtol_` prefix.
+All metrics use the `vllm_responses_` prefix.
 
 #### HTTP Metrics
 
-| Metric                               | Type      | Labels                      | Description                                                          |
-| ------------------------------------ | --------- | --------------------------- | -------------------------------------------------------------------- |
-| `vtol_http_requests_total`           | Counter   | `method`, `route`, `status` | Total HTTP requests completed                                        |
-| `vtol_http_request_duration_seconds` | Histogram | `method`, `route`           | HTTP handler duration (excludes SSE stream lifetime)                 |
-| `vtol_http_in_flight_requests`       | Gauge     | -                           | Requests currently being handled (does not include open SSE streams) |
+| Metric                                         | Type      | Labels                      | Description                                                          |
+| ---------------------------------------------- | --------- | --------------------------- | -------------------------------------------------------------------- |
+| `vllm_responses_http_requests_total`           | Counter   | `method`, `route`, `status` | Total HTTP requests completed                                        |
+| `vllm_responses_http_request_duration_seconds` | Histogram | `method`, `route`           | HTTP handler duration (excludes SSE stream lifetime)                 |
+| `vllm_responses_http_in_flight_requests`       | Gauge     | -                           | Requests currently being handled (does not include open SSE streams) |
 
 #### SSE Streaming Metrics
 
-| Metric                             | Type      | Labels  | Description                                                                                |
-| ---------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------ |
-| `vtol_sse_connections_in_flight`   | Gauge     | -       | SSE connections currently open                                                             |
-| `vtol_sse_stream_duration_seconds` | Histogram | `route` | Full SSE stream lifetime from request start (including time-to-first-chunk) to termination |
+| Metric                                       | Type      | Labels  | Description                                                                                |
+| -------------------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------ |
+| `vllm_responses_sse_connections_in_flight`   | Gauge     | -       | SSE connections currently open                                                             |
+| `vllm_responses_sse_stream_duration_seconds` | Histogram | `route` | Full SSE stream lifetime from request start (including time-to-first-chunk) to termination |
 
 SSE metrics capture the end-to-end streaming duration for the `/v1/responses` endpoint, which is the primary API path.
 
 #### Tool Metrics
 
-| Metric                                 | Type      | Labels                   | Description                          |
-| -------------------------------------- | --------- | ------------------------ | ------------------------------------ |
-| `vtol_tool_calls_requested_total`      | Counter   | `tool_type`              | Tool calls requested by the model    |
-| `vtol_tool_calls_executed_total`       | Counter   | `tool_type`              | Tool calls executed by the gateway   |
-| `vtol_tool_execution_duration_seconds` | Histogram | `tool_type`              | Tool execution wall-clock duration   |
-| `vtol_tool_errors_total`               | Counter   | `tool_type`              | Tool execution errors                |
-| `vtol_mcp_server_startup_total`        | Counter   | `server_label`, `status` | Built-in MCP server startup outcomes |
+| Metric                                           | Type      | Labels                   | Description                          |
+| ------------------------------------------------ | --------- | ------------------------ | ------------------------------------ |
+| `vllm_responses_tool_calls_requested_total`      | Counter   | `tool_type`              | Tool calls requested by the model    |
+| `vllm_responses_tool_calls_executed_total`       | Counter   | `tool_type`              | Tool calls executed by the gateway   |
+| `vllm_responses_tool_execution_duration_seconds` | Histogram | `tool_type`              | Tool execution wall-clock duration   |
+| `vllm_responses_tool_errors_total`               | Counter   | `tool_type`              | Tool execution errors                |
+| `vllm_responses_mcp_server_startup_total`        | Counter   | `server_label`, `status` | Built-in MCP server startup outcomes |
 
 **Tool types:**
 
@@ -95,7 +95,7 @@ SSE metrics capture the end-to-end streaming duration for the `/v1/responses` en
 Notes:
 
 - MCP metrics are not split by mode (Built-in MCP vs Remote MCP) in current metrics.
-- `vtol_mcp_server_startup_total` is hosted-only (there is no startup metric for Client-Specified Remote declarations).
+- `vllm_responses_mcp_server_startup_total` is hosted-only (there is no startup metric for Client-Specified Remote declarations).
 
 #### Metric Labels
 
@@ -132,7 +132,7 @@ export VR_OPENTELEMETRY_HOST=otel-collector
 export VR_OPENTELEMETRY_PORT=4317
 
 # Service name in traces
-export VR_OTEL_SERVICE_NAME=vtol-gateway
+export VR_OTEL_SERVICE_NAME=vllm_responses
 ```
 
 ### What Gets Traced

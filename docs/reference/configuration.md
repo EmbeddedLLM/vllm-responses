@@ -82,7 +82,7 @@ Notes:
 | **`VR_METRICS_ENABLED`**      | Enable Prometheus-compatible metrics and the `GET /metrics` endpoint. | `True`           |
 | **`VR_METRICS_PATH`**         | Metrics endpoint path.                                                | `/metrics`       |
 | **`VR_TRACING_ENABLED`**      | Enable OpenTelemetry tracing (OTLP gRPC exporter).                    | `False`          |
-| **`VR_OTEL_SERVICE_NAME`**    | Service name used in OpenTelemetry resources.                         | `vllm_responses` |
+| **`VR_OTEL_SERVICE_NAME`**    | Service name used in OpenTelemetry resources.                         | `vllm-responses` |
 | **`VR_TRACING_SAMPLE_RATIO`** | Trace sampling ratio in `[0.0, 1.0]` (ratio-based).                   | `0.01`           |
 | **`VR_OPENTELEMETRY_HOST`**   | OTLP endpoint host (gRPC).                                            | `otel-collector` |
 | **`VR_OPENTELEMETRY_PORT`**   | OTLP endpoint port (gRPC).                                            | `4317`           |
