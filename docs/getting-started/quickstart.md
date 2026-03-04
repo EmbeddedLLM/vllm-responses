@@ -36,7 +36,7 @@ ______________________________________________________________________
 
 Now, send a request to the **Responses API** endpoint (`/v1/responses`).
 
-=== "cURL"
+=== "cURL (streaming with Code Interpreter)"
 
     ```bash
     curl -X POST http://127.0.0.1:5969/v1/responses \
@@ -44,8 +44,24 @@ Now, send a request to the **Responses API** endpoint (`/v1/responses`).
       -H "Authorization: Bearer dummy" \
       -d '{
         "model": "meta-llama/Llama-3.2-3B-Instruct",
-        "input": [{"role": "user", "content": "Hello! What are you?"}],
-        "stream": true
+        "input": [{"role": "user", "content": "Calculate the factorial of 5"}],
+        "stream": true,
+        "tools": [{"type": "code_interpreter"}],
+        "include": ["code_interpreter_call.outputs"]
+      }'
+    ```
+
+=== "cURL (non-streaming)"
+
+    ```bash
+    curl -X POST http://127.0.0.1:5969/v1/responses \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer dummy" \
+      -d '{
+        "model": "meta-llama/Llama-3.2-3B-Instruct",
+        "input": [{"role": "user", "content": "Calculate the factorial of 5"}],
+        "tools": [{"type": "code_interpreter"}],
+        "include": ["code_interpreter_call.outputs"]
       }'
     ```
 
@@ -56,7 +72,9 @@ Now, send a request to the **Responses API** endpoint (`/v1/responses`).
 
     with client.responses.stream(
         model="meta-llama/Llama-3.2-3B-Instruct",
-        input=[{"role": "user", "content": "Hello! What are you?"}],
+        input=[{"role": "user", "content": "Calculate the factorial of 5"}],
+        tools=[{"type": "code_interpreter"}],
+        include=["code_interpreter_call.outputs"],
     ) as stream:
         for event in stream:
             print(event)
