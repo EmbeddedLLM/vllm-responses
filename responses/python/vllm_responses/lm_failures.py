@@ -6,7 +6,6 @@ from typing import Any
 from loguru import logger
 from pydantic_ai import ModelHTTPError, UnexpectedModelBehavior
 
-from vllm_responses.configs import ENV_CONFIG
 from vllm_responses.responses_core.models import (
     CodeInterpreterCallStarted,
     FunctionCallStarted,
@@ -190,6 +189,7 @@ def log_failure_summary(
     messages: list[Any] | Any,
     counters: FailureCounters,
     upstream_error_raw: str | None,
+    log_model_messages: bool,
 ) -> None:
     summary: dict[str, Any] = {
         "request_id": response_id,
@@ -214,7 +214,7 @@ def log_failure_summary(
     log_fn = logger.warning if log_level == "warning" else logger.error
     log_fn("LMEngine failure summary: {}", summary)
 
-    if not ENV_CONFIG.log_model_messages:
+    if not log_model_messages:
         return
 
     if not isinstance(messages, list):

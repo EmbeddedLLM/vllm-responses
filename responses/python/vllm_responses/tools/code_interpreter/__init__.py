@@ -2,13 +2,15 @@ import asyncio
 import os
 import shutil
 from asyncio.subprocess import Process
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from pathlib import Path
 from time import perf_counter
 
 import httpx
 from loguru import logger
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.runtime import RuntimeConfig
 from vllm_responses.observability.metrics import record_tool_executed
 from vllm_responses.tools import register
 from vllm_responses.utils.exceptions import BadInputError
@@ -17,17 +19,32 @@ from vllm_responses.utils.io import get_async_client
 HTTP_ACLIENT = get_async_client()
 
 CODE_INTERPRETER_TOOL = "code_interpreter"
+_PROCESS_RUNTIME_CONFIG: RuntimeConfig | None = None
+_REQUEST_RUNTIME_CONFIG: ContextVar[RuntimeConfig | None] = ContextVar(
+    "code_interpreter_runtime_config",
+    default=None,
+)
 
 
-def _get_pyodide_cache_dir() -> str:
-    if ENV_CONFIG.pyodide_cache_dir and ENV_CONFIG.pyodide_cache_dir.strip():
-        return ENV_CONFIG.pyodide_cache_dir.strip()
-    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
-    if xdg:
-        base = Path(xdg)
-    else:
-        base = Path.home() / ".cache"
-    return str(base / "vllm-responses" / "pyodide")
+def configure_code_interpreter(runtime_config: RuntimeConfig) -> None:
+    global _PROCESS_RUNTIME_CONFIG
+    _PROCESS_RUNTIME_CONFIG = runtime_config
+
+
+@contextmanager
+def bind_runtime_config(runtime_config: RuntimeConfig):
+    token: Token[RuntimeConfig | None] = _REQUEST_RUNTIME_CONFIG.set(runtime_config)
+    try:
+        yield
+    finally:
+        _REQUEST_RUNTIME_CONFIG.reset(token)
+
+
+def _require_process_runtime_config() -> RuntimeConfig:
+    runtime_config = _PROCESS_RUNTIME_CONFIG
+    if runtime_config is None:
+        raise RuntimeError("Code interpreter runtime config is not initialized.")
+    return runtime_config
 
 
 def _ensure_executable(path: Path) -> None:
@@ -46,7 +63,11 @@ def _ensure_executable(path: Path) -> None:
 
 
 def _get_spawn_command(
-    *, port: int, workers: int, pyodide_cache_dir: str
+    *,
+    runtime_config: RuntimeConfig,
+    port: int,
+    workers: int,
+    pyodide_cache_dir: str,
 ) -> tuple[list[str], str]:
     """
     Returns (argv, cwd) for spawning the code interpreter server.
@@ -70,7 +91,7 @@ def _get_spawn_command(
             argv.extend(["--workers", str(workers)])
         return argv, str(code_interpreter_dir)
 
-    if ENV_CONFIG.code_interpreter_dev_bun_fallback:
+    if runtime_config.code_interpreter_dev_bun_fallback:
         bun_bin = shutil.which("bun")
         if not bun_bin:
             raise RuntimeError(
@@ -96,16 +117,22 @@ def _get_spawn_command(
     raise RuntimeError(
         "No bundled code interpreter binary was found for this platform/install.\n"
         "If you're running from source, you can set VR_CODE_INTERPRETER_DEV_BUN_FALLBACK=1 "
-        "and install Bun, or disable the tool via VR_CODE_INTERPRETER_MODE=disabled."
+        "and install Bun, or disable the tool via the supported entrypoint flags."
     )
 
 
 async def start_server(*, port: int | None = None, workers: int = 0) -> Process:
-    effective_port = ENV_CONFIG.code_interpreter_port if port is None else port
+    runtime_config = _require_process_runtime_config()
+    effective_port = runtime_config.code_interpreter_port if port is None else port
     logger.info(f"Starting code interpreter server on port {effective_port}...")
-    pyodide_cache_dir = _get_pyodide_cache_dir()
+    pyodide_cache_dir = runtime_config.pyodide_cache_dir
+    if pyodide_cache_dir is None:
+        raise RuntimeError("Code interpreter cache directory is not configured.")
     command, cwd = _get_spawn_command(
-        port=effective_port, workers=workers, pyodide_cache_dir=pyodide_cache_dir
+        runtime_config=runtime_config,
+        port=effective_port,
+        workers=workers,
+        pyodide_cache_dir=pyodide_cache_dir,
     )
     process: Process = await asyncio.create_subprocess_exec(
         *command,
@@ -117,7 +144,7 @@ async def start_server(*, port: int | None = None, workers: int = 0) -> Process:
 
     # The Bun server starts listening only after Pyodide initialization completes.
     # First run may download/extract a large Pyodide tarball, so allow a longer startup window.
-    startup_timeout_s = 10 * 60
+    startup_timeout_s = float(runtime_config.code_interpreter_startup_timeout_s)
     deadline = perf_counter() + startup_timeout_s
     attempt = 0
 
@@ -198,10 +225,17 @@ async def run_code(code: str) -> str:
         captured stdio and the final expression display (if any) are mapped into
         `code_interpreter_call.outputs` as `{"type":"logs","logs":"..."}` entries.
     """
-    if ENV_CONFIG.code_interpreter_mode == "disabled":
+    runtime_config = _REQUEST_RUNTIME_CONFIG.get()
+    if runtime_config is None:
+        runtime_config = _PROCESS_RUNTIME_CONFIG
+    if runtime_config is None:
+        raise RuntimeError("Code interpreter runtime config is not initialized.")
+    if runtime_config.code_interpreter_mode == "disabled":
         raise BadInputError("`code_interpreter` is disabled by configuration.")
+    if runtime_config.code_interpreter_port is None:
+        raise RuntimeError("Code interpreter runtime port is not configured.")
     logger.debug(f"Evaluating code: `{code!r}`")
-    url = f"http://localhost:{ENV_CONFIG.code_interpreter_port}/python"
+    url = f"http://localhost:{runtime_config.code_interpreter_port}/python"
     start = perf_counter()
     errored = False
 

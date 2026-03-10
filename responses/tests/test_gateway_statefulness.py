@@ -142,3 +142,118 @@ async def test_previous_response_id_custom_function_tool_loop_omit_tools(
     assert "event: response.completed" in text2
     assert "data: [DONE]\n\n" in text2
     assert "4" in text2
+
+
+@pytest.mark.anyio
+async def test_retrieve_response_returns_stored_response(
+    patched_gateway_clients,
+    gateway_client: httpx.AsyncClient,
+    cassette_replayer_factory,
+) -> None:
+    mock_llm.app.state.vllm_responses.cassette_replayer = cassette_replayer_factory(
+        "text-single-stream.yaml"
+    )
+
+    create_resp = await gateway_client.post(
+        "/v1/responses",
+        json={
+            "model": "some-model",
+            "stream": False,
+            "input": [{"role": "user", "content": "Hello"}],
+            "tool_choice": "none",
+        },
+    )
+    assert create_resp.status_code == 200
+    created = create_resp.json()
+
+    retrieve_resp = await gateway_client.get(f"/v1/responses/{created['id']}")
+    assert retrieve_resp.status_code == 200
+    retrieved = retrieve_resp.json()
+    assert retrieved["id"] == created["id"]
+    assert retrieved["status"] == created["status"]
+
+
+@pytest.mark.anyio
+async def test_retrieve_response_missing_returns_openai_error(
+    patched_gateway_clients,
+    gateway_client: httpx.AsyncClient,
+) -> None:
+    resp = await gateway_client.get("/v1/responses/resp_missing")
+
+    assert resp.status_code == 404
+    assert resp.json() == {
+        "error": {
+            "message": "No response found with id 'resp_missing'.",
+            "type": "invalid_request_error",
+            "param": "response_id",
+            "code": "response_not_found",
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_previous_response_id_missing_returns_openai_error(
+    patched_gateway_clients,
+    gateway_client: httpx.AsyncClient,
+) -> None:
+    resp = await gateway_client.post(
+        "/v1/responses",
+        json={
+            "model": "some-model",
+            "stream": False,
+            "previous_response_id": "resp_missing",
+            "input": [{"role": "user", "content": "Hello"}],
+            "tool_choice": "none",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json() == {
+        "error": {
+            "message": "No response found with id 'resp_missing'.",
+            "type": "invalid_request_error",
+            "param": "previous_response_id",
+            "code": "previous_response_not_found",
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_store_false_response_is_not_retrievable_or_continuable(
+    patched_gateway_clients,
+    gateway_client: httpx.AsyncClient,
+    cassette_replayer_factory,
+) -> None:
+    mock_llm.app.state.vllm_responses.cassette_replayer = cassette_replayer_factory(
+        "text-single-stream.yaml"
+    )
+
+    create_resp = await gateway_client.post(
+        "/v1/responses",
+        json={
+            "model": "some-model",
+            "stream": False,
+            "store": False,
+            "input": [{"role": "user", "content": "Hello"}],
+            "tool_choice": "none",
+        },
+    )
+    assert create_resp.status_code == 200
+    response_id = create_resp.json()["id"]
+
+    retrieve_resp = await gateway_client.get(f"/v1/responses/{response_id}")
+    assert retrieve_resp.status_code == 404
+    assert retrieve_resp.json()["error"]["code"] == "response_not_found"
+
+    continue_resp = await gateway_client.post(
+        "/v1/responses",
+        json={
+            "model": "some-model",
+            "stream": False,
+            "previous_response_id": response_id,
+            "input": [{"role": "user", "content": "Continue"}],
+            "tool_choice": "none",
+        },
+    )
+    assert continue_resp.status_code == 400
+    assert continue_resp.json()["error"]["code"] == "previous_response_not_found"

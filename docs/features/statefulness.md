@@ -60,5 +60,5 @@ See [Configuration Reference](../reference/configuration.md) and [Configuration 
 
 - **Capability-Based Access**: The `response_id` acts as a capability token. Anyone who possesses the ID can continue the conversation. Treat these IDs as secrets (like session tokens).
 - **Persistence**: By default, responses are stored indefinitely (or until an expiration policy is configured/implemented).
-- **`store` Parameter**: You can control whether a response is stored using the `store` parameter (default: `true`). If `store=false`, the response cannot be used as a `previous_response_id` later.
+- **`store` Parameter**: You can control whether a response is stored using the `store` parameter (default: `true`). If `store=false`, the response is not persisted and cannot be retrieved later or used as a `previous_response_id`.
 - **Terminal Statuses**: Stored terminal responses include both `completed` and `incomplete`. Non-terminal and failed states are not continuation anchors.

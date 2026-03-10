@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, Counter, Gauge, Histogram
 from prometheus_client.exposition import generate_latest
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.runtime import RuntimeConfig
 
 HTTP_DURATION_BUCKETS = (
     0.005,
@@ -91,6 +91,14 @@ class _GatewayMetrics:
 
 
 _METRICS: _GatewayMetrics | None = None
+_METRICS_ENABLED = True
+_METRICS_PATH = "/metrics"
+
+
+def configure_metrics(runtime_config: RuntimeConfig) -> None:
+    global _METRICS_ENABLED, _METRICS_PATH
+    _METRICS_ENABLED = runtime_config.metrics_enabled
+    _METRICS_PATH = runtime_config.metrics_path
 
 
 def _get_metrics() -> _GatewayMetrics:
@@ -185,48 +193,114 @@ def _exposition_registry() -> CollectorRegistry | None:
     return registry
 
 
-def install_prometheus_metrics(app: FastAPI) -> None:
-    """
-    Install:
-    - `GET {VR_METRICS_PATH}` Prometheus scrape endpoint (not in OpenAPI schema)
-    - one HTTP middleware for low-cardinality Golden Signals
-    """
-    if not ENV_CONFIG.metrics_enabled:
+def ensure_gateway_metrics_registered() -> None:
+    if not _METRICS_ENABLED:
+        return
+    _get_metrics()
+
+
+def should_skip_gateway_http_metrics(
+    request: Request,
+    *,
+    internal_upstream_header: str | None = None,
+) -> bool:
+    if request.url.path in {_METRICS_PATH, "/health"}:
+        return True
+    return bool(internal_upstream_header and request.headers.get(internal_upstream_header) == "1")
+
+
+def begin_gateway_http_request() -> float | None:
+    if not _METRICS_ENABLED:
+        return None
+    metrics = _get_metrics()
+    metrics.http_in_flight_requests.inc()
+    return time.perf_counter()
+
+
+def finish_gateway_http_request(
+    *,
+    request: Request,
+    status_code: int,
+    start_time: float | None,
+) -> None:
+    if start_time is None or not _METRICS_ENABLED:
         return
 
     metrics = _get_metrics()
-    metrics_path = ENV_CONFIG.metrics_path
+    duration_s = max(0.0, time.perf_counter() - start_time)
+    method = request.method
+    route = _derive_route_label(request)
+    metrics.http_request_duration_seconds.labels(method=method, route=route).observe(duration_s)
+    metrics.http_requests_total.labels(
+        method=method,
+        route=route,
+        status=str(status_code),
+    ).inc()
+    metrics.http_in_flight_requests.dec()
 
-    @app.get(metrics_path, include_in_schema=False)
+
+def install_prometheus_metrics_endpoint(app: FastAPI) -> None:
+    """
+    Install `GET {VR_METRICS_PATH}` Prometheus scrape endpoint (not in OpenAPI schema).
+    """
+    if not _METRICS_ENABLED:
+        return
+
+    @app.get(_METRICS_PATH, include_in_schema=False)
     async def metrics_endpoint() -> Response:
         registry = _exposition_registry()
         body = generate_latest(registry) if registry is not None else generate_latest()
         return Response(content=body, media_type=CONTENT_TYPE_LATEST)
 
+
+def install_prometheus_metrics_middleware(
+    app: FastAPI,
+    *,
+    internal_upstream_header: str | None = None,
+) -> None:
+    """
+    Install one HTTP middleware for low-cardinality Golden Signals.
+    """
+    if not _METRICS_ENABLED:
+        return
+
     @app.middleware("http")
     async def prometheus_middleware(request: Request, call_next):
-        # Exclude self-scrapes/health checks to avoid recursion and reduce noise.
-        if request.url.path in {metrics_path, "/health"}:
+        if should_skip_gateway_http_metrics(
+            request,
+            internal_upstream_header=internal_upstream_header,
+        ):
             return await call_next(request)
 
-        metrics.http_in_flight_requests.inc()
-        start = time.perf_counter()
+        start = begin_gateway_http_request()
         status_code = 500
         try:
             response = await call_next(request)
             status_code = response.status_code
             return response
         finally:
-            duration_s = max(0.0, time.perf_counter() - start)
-            method = request.method
-            route = _derive_route_label(request)
-            metrics.http_request_duration_seconds.labels(method=method, route=route).observe(
-                duration_s
+            finish_gateway_http_request(
+                request=request,
+                status_code=status_code,
+                start_time=start,
             )
-            metrics.http_requests_total.labels(
-                method=method, route=route, status=str(status_code)
-            ).inc()
-            metrics.http_in_flight_requests.dec()
+
+
+def install_prometheus_metrics(
+    app: FastAPI,
+    *,
+    internal_upstream_header: str | None = None,
+) -> None:
+    """
+    Install:
+    - `GET {VR_METRICS_PATH}` Prometheus scrape endpoint (not in OpenAPI schema)
+    - one HTTP middleware for low-cardinality Golden Signals
+    """
+    install_prometheus_metrics_endpoint(app)
+    install_prometheus_metrics_middleware(
+        app,
+        internal_upstream_header=internal_upstream_header,
+    )
 
 
 def instrument_sse_stream(
@@ -241,7 +315,7 @@ def instrument_sse_stream(
     - Must be called *before* the first `anext(...)` on the iterator to include the full lifetime.
     - Decrements gauges and records duration on normal completion, disconnect, and errors.
     """
-    if not ENV_CONFIG.metrics_enabled:
+    if not _METRICS_ENABLED:
         return agen
 
     metrics = _get_metrics()
@@ -261,13 +335,13 @@ def instrument_sse_stream(
 
 
 def record_tool_call_requested(tool_type: ToolType) -> None:
-    if not ENV_CONFIG.metrics_enabled:
+    if not _METRICS_ENABLED:
         return
     _get_metrics().tool_calls_requested_total.labels(tool_type=tool_type).inc()
 
 
 def record_tool_executed(*, tool_type: ToolType, duration_s: float, errored: bool) -> None:
-    if not ENV_CONFIG.metrics_enabled:
+    if not _METRICS_ENABLED:
         return
 
     metrics = _get_metrics()
@@ -280,7 +354,7 @@ def record_tool_executed(*, tool_type: ToolType, duration_s: float, errored: boo
 
 
 def record_mcp_server_startup(*, server_label: str, status: Literal["ok", "error"]) -> None:
-    if not ENV_CONFIG.metrics_enabled:
+    if not _METRICS_ENABLED:
         return
     _get_metrics().mcp_server_startup_total.labels(
         server_label=server_label,

@@ -7,14 +7,14 @@ from datetime import datetime, timezone
 from typing import Any, Protocol, Self
 
 from pydantic import BaseModel, TypeAdapter
-from sqlalchemy import Column, DateTime, Text
+from sqlalchemy import JSON, Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from vllm_responses.configs import CACHE, ENV_CONFIG
+from vllm_responses.configs.runtime import RuntimeConfig
 from vllm_responses.db import create_db_engine_async, postgres_advisory_lock
 from vllm_responses.types.openai import (
     OpenAIAllowedToolsChoice,
@@ -28,7 +28,8 @@ from vllm_responses.types.openai import (
     vLLMResponsesRequest,
     vLLMResponsesTool,
 )
-from vllm_responses.utils.exceptions import BadInputError
+from vllm_responses.utils.cache import Cache
+from vllm_responses.utils.exceptions import BadInputError, ResponsesAPIError
 from vllm_responses.utils.io import json_dumps, json_loads
 
 """
@@ -59,6 +60,20 @@ _vllm_input_list_adapter = TypeAdapter(list[vLLMInput])
 _tools_list_adapter = TypeAdapter(list[vLLMResponsesTool])
 _tool_choice_adapter = TypeAdapter(OpenAIToolChoice)
 _PERSISTABLE_RESPONSE_STATUSES = frozenset({"completed", "incomplete"})
+_STORE_RUNTIME_CONFIG: RuntimeConfig | None = None
+_STORE_CACHE: Cache | None = None
+
+
+def configure_response_store(runtime_config: RuntimeConfig) -> None:
+    global _STORE_RUNTIME_CONFIG, _STORE_CACHE, _DEFAULT_STORE
+    _STORE_RUNTIME_CONFIG = runtime_config
+    _STORE_CACHE = Cache(
+        redis_url=f"redis://{runtime_config.redis_host}:{runtime_config.redis_port}/1",
+    )
+    _DEFAULT_STORE = DBResponseStore(
+        engine=create_db_engine_async(runtime_config),
+        owns_engine=False,
+    )
 
 
 def _normalize_input(value: str | list[vLLMInput]) -> list[vLLMInput]:
@@ -140,7 +155,7 @@ class ResponsesState(SQLModel, table=True):
     schema_version: int
     state_json: Any = Field(
         sa_column=Column(
-            JSONB if ENV_CONFIG.db_dialect == "postgresql" else Text,
+            JSON().with_variant(JSONB, "postgresql"),
             nullable=False,
         )
     )
@@ -150,7 +165,7 @@ class DBResponseStore:
     """DB-backed ResponseStore.
 
     MVP Stage 2 scope:
-    - SQLite (dev/embedded) + Postgres (prod) only (via ENV_CONFIG.db_path)
+    - SQLite (dev/embedded) + Postgres (prod) only (via configured runtime DB URL)
     - schema is intentionally minimal and stable; state lives primarily in `state_json`
     """
 
@@ -166,10 +181,16 @@ class DBResponseStore:
         self._use_native_json = self._dialect_name == "postgresql"
 
     def _cache_enabled(self) -> bool:
-        return ENV_CONFIG.response_store_cache
+        runtime_config = _STORE_RUNTIME_CONFIG
+        if runtime_config is None:
+            return False
+        return runtime_config.response_store_cache
 
     def _cache_ttl_seconds(self) -> int:
-        return max(1, ENV_CONFIG.response_store_cache_ttl_seconds)
+        runtime_config = _STORE_RUNTIME_CONFIG
+        if runtime_config is None:
+            return 3600
+        return max(1, runtime_config.response_store_cache_ttl_seconds)
 
     def _cache_key(self, *, response_id: str) -> str:
         return f"vllm_responses:responses_state:v{SCHEMA_VERSION}:{response_id}"
@@ -214,15 +235,21 @@ class DBResponseStore:
         )
 
     async def _cache_get(self, *, response_id: str) -> StoredResponse | None:
+        cache = _STORE_CACHE
+        if cache is None:
+            return None
         key = self._cache_key(response_id=response_id)
-        raw = await CACHE.get_json(key)
+        raw = await cache.get_json(key)
         if raw is None:
             return None
         return self._decode_cache_entry(raw)
 
     async def _cache_set(self, stored: StoredResponse) -> None:
+        cache = _STORE_CACHE
+        if cache is None:
+            return
         key = self._cache_key(response_id=stored.response_id)
-        await CACHE.set_json(key, self._encode_cache_entry(stored), ex=self._cache_ttl_seconds())
+        await cache.set_json(key, self._encode_cache_entry(stored), ex=self._cache_ttl_seconds())
 
     @classmethod
     def from_db_url(cls, *, db_url: str) -> Self:
@@ -254,7 +281,12 @@ class DBResponseStore:
             if self._schema_is_marked_ready():
                 self._schema_ready = True
                 return
-            if ENV_CONFIG.db_dialect == "sqlite" and ENV_CONFIG.workers > 1:
+            runtime_config = _STORE_RUNTIME_CONFIG
+            db_dialect = self._dialect_name
+            gateway_workers = 1 if runtime_config is None else runtime_config.gateway_workers
+            if runtime_config is not None:
+                db_dialect = runtime_config.db_dialect
+            if db_dialect == "sqlite" and gateway_workers > 1:
                 raise RuntimeError(
                     "SQLite schema initialization is not multi-worker safe when started directly. "
                     "Use `vllm-responses serve` (recommended) or run with VR_WORKERS=1."
@@ -262,7 +294,7 @@ class DBResponseStore:
             # DDL must be committed on Postgres. Using `engine.begin()` ensures the DDL is
             # executed within a transaction that is committed on success.
             async with self._engine.begin() as conn:
-                if ENV_CONFIG.db_dialect == "postgresql":
+                if db_dialect == "postgresql":
                     async with postgres_advisory_lock(conn, name=POSTGRES_SCHEMA_LOCK_NAME):
                         await conn.run_sync(SQLModel.metadata.create_all)
                 else:
@@ -314,14 +346,16 @@ class DBResponseStore:
         hydrated_request: vLLMResponsesRequest,
         response: OpenAIResponsesResponse,
     ) -> None:
-        await self.ensure_schema()
-
         # Historical method name; persists terminal responses that can be continued via
         # `previous_response_id` (completed and incomplete).
         if response.status not in _PERSISTABLE_RESPONSE_STATUSES:
             return
         if not response.id:
             return
+        if not request.store:
+            return
+
+        await self.ensure_schema()
 
         hydrated_input = _normalize_input(hydrated_request.input)
         payload = StoredResponsePayload(
@@ -387,7 +421,12 @@ class DBResponseStore:
 
         stored = await self.get(response_id=request.previous_response_id)
         if stored is None:
-            raise BadInputError(f"Unknown previous_response_id: {request.previous_response_id}")
+            raise ResponsesAPIError(
+                f"No response found with id '{request.previous_response_id}'.",
+                status_code=400,
+                param="previous_response_id",
+                code="previous_response_not_found",
+            )
 
         payload = stored.payload()
 
@@ -449,9 +488,8 @@ _DEFAULT_STORE: DBResponseStore | None = None
 
 
 def get_default_response_store() -> DBResponseStore:
-    global _DEFAULT_STORE
     if _DEFAULT_STORE is None:
-        _DEFAULT_STORE = DBResponseStore(engine=create_db_engine_async(), owns_engine=False)
+        raise RuntimeError("Response store is not configured.")
     return _DEFAULT_STORE
 
 

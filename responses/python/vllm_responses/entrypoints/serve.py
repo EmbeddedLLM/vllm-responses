@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import sys
 
-from vllm_responses.entrypoints._serve_spec import ServeSpecError, build_serve_spec
-from vllm_responses.entrypoints._serve_supervisor import run_serve_spec
-from vllm_responses.entrypoints._serve_utils import EnvLookup
+from vllm_responses.configs.builders import RuntimeConfigError, build_runtime_config_for_supervisor
+from vllm_responses.configs.sources import EnvSource
+from vllm_responses.configs.startup import add_supervisor_responses_cli_arguments
+from vllm_responses.entrypoints._serve._runtime import run_serve_spec
+from vllm_responses.entrypoints._serve._spec import ServeSpecError, build_serve_spec
 
 
 def _add_serve_arguments(parser: argparse.ArgumentParser) -> None:
@@ -13,51 +15,13 @@ def _add_serve_arguments(parser: argparse.ArgumentParser) -> None:
         "--upstream",
         type=str,
         default=None,
-        help="External upstream base URL (OpenAI-compatible). '/v1' is optional; we normalize it.",
+        help="Exact external upstream API base URL (for example, http://127.0.0.1:8000/v1).",
     )
 
     parser.add_argument("--gateway-host", type=str, default=None, help="Gateway bind host.")
     parser.add_argument("--gateway-port", type=int, default=None, help="Gateway bind port.")
     parser.add_argument("--gateway-workers", type=int, default=None, help="Gunicorn worker count.")
-
-    parser.add_argument(
-        "--code-interpreter",
-        type=str,
-        choices=["spawn", "external", "disabled"],
-        default=None,
-        help="Code interpreter runtime policy (default: spawn).",
-    )
-    parser.add_argument(
-        "--code-interpreter-port",
-        type=int,
-        default=None,
-        help="Code interpreter port (when spawn|external).",
-    )
-    parser.add_argument(
-        "--code-interpreter-workers",
-        type=int,
-        default=None,
-        help="Bun server --workers (only meaningful when --code-interpreter=spawn).",
-    )
-
-    parser.add_argument(
-        "--vllm-startup-timeout",
-        type=float,
-        default=None,
-        help="Max seconds to wait for /v1/models (default: 1800).",
-    )
-    parser.add_argument(
-        "--vllm-ready-interval",
-        type=float,
-        default=None,
-        help="Seconds between readiness status messages (default: 5).",
-    )
-    parser.add_argument(
-        "--code-interpreter-startup-timeout",
-        type=float,
-        default=None,
-        help="Max seconds to wait for code interpreter /health (default: 600).",
-    )
+    add_supervisor_responses_cli_arguments(parser)
 
 
 def _build_root_parser() -> argparse.ArgumentParser:
@@ -65,53 +29,42 @@ def _build_root_parser() -> argparse.ArgumentParser:
         prog="vllm-responses",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Local runtime supervisor for the vLLM Responses gateway.\n\n"
-            "Use `vllm-responses serve` to run the gateway, optionally spawning vLLM and the\n"
-            "code-interpreter singleton service."
+            "Remote-upstream runtime supervisor for the vLLM Responses gateway.\n\n"
+            "Use `vllm-responses serve` to run the gateway against an existing upstream.\n"
+            "Use `vllm serve --responses` for the colocated single-command local stack."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     serve = subparsers.add_parser(
         "serve",
-        help="Run gateway + (optional) vLLM + code interpreter.",
+        help="Run the remote-upstream gateway supervisor.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Run the full local stack.\n\n"
-            "If you provide `--`, everything after it is forwarded to `vllm serve`.\n"
-            "If you provide --upstream, vLLM is not spawned."
+            "Run the gateway against an existing OpenAI-compatible upstream.\n\n"
+            "This command does not spawn vLLM.\n"
+            "For the colocated single-command local stack, use `vllm serve --responses`."
         ),
         epilog=(
             "Examples:\n"
-            "  External upstream (do not spawn vLLM):\n"
-            "    vllm-responses serve --upstream http://127.0.0.1:8457\n"
-            "    # '/v1' is optional; we normalize it.\n\n"
-            "  Spawn vLLM (args after `--` go to `vllm serve`):\n"
-            "    vllm-responses serve --gateway-workers 4 -- \\\n"
-            "      meta-llama/Llama-3.2-3B-Instruct \\\n"
-            "      --dtype auto \\\n"
-            "      --port 8457\n\n"
-            "Notes:\n"
-            "  - When spawning vLLM, the first arg after `--` must be <MODEL_ID_OR_PATH>.\n"
-            "  - If you set a custom vLLM --port/--host, the supervisor uses those values for readiness and wiring.\n"
+            "  External upstream:\n"
+            "    vllm-responses serve --upstream http://127.0.0.1:8000/v1\n\n"
+            "  External upstream with more gateway workers:\n"
+            "    vllm-responses serve --gateway-workers 4 --upstream http://127.0.0.1:8000/v1\n"
         ),
     )
     _add_serve_arguments(serve)
-    serve.add_argument(
-        "vllm_args",
-        nargs=argparse.REMAINDER,
-        help="Arguments for `vllm serve` (must be preceded by `--`).",
-    )
     return parser
 
 
-def _run_serve(args: argparse.Namespace, vllm_argv: list[str], *, had_delimiter: bool) -> int:
-    env = EnvLookup.from_cwd()
+def _run_serve(args: argparse.Namespace) -> int:
+    env = EnvSource.from_env()
     try:
-        spec = build_serve_spec(args, vllm_argv, had_delimiter=had_delimiter, env=env)
-    except ServeSpecError as e:
-        print(str(e), file=sys.stderr)
-        return e.exit_code
+        runtime_config = build_runtime_config_for_supervisor(args=args, env=env)
+        spec = build_serve_spec(runtime_config)
+    except (RuntimeConfigError, ServeSpecError) as exc:
+        print(str(exc), file=sys.stderr)
+        return exc.exit_code
 
     return run_serve_spec(spec)
 
@@ -119,33 +72,12 @@ def _run_serve(args: argparse.Namespace, vllm_argv: list[str], *, had_delimiter:
 def main(argv: list[str] | None = None) -> None:
     raw = list(sys.argv[1:] if argv is None else argv)
     parser = _build_root_parser()
-    had_delimiter = "--" in raw
     ns = parser.parse_args(raw)
 
     if ns.command != "serve":
         parser.error("unknown subcommand")
 
-    # argparse eats the `--` delimiter; enforce it explicitly for vLLM passthrough.
-    if not had_delimiter and ns.vllm_args:
-        print("[serve] error: vLLM args must be provided after `--`.", file=sys.stderr)
-        sys.exit(2)
-
-    vllm_args = _normalize_remainder_args(list(ns.vllm_args))
-
-    sys.exit(_run_serve(ns, vllm_args, had_delimiter=had_delimiter))
-
-
-def _normalize_remainder_args(args: list[str]) -> list[str]:
-    """
-    Normalize argparse REMAINDER for vLLM args.
-
-    When using `nargs=argparse.REMAINDER`, `argparse` may include the literal `--` delimiter
-    in the resulting list. For our "pass-through after --" contract, we strip exactly one
-    leading delimiter token if present.
-    """
-    if args and args[0] == "--":
-        return args[1:]
-    return args
+    sys.exit(_run_serve(ns))
 
 
 if __name__ == "__main__":

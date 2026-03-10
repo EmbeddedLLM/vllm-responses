@@ -170,6 +170,7 @@ all = [
 
 [project.scripts]
 vllm-responses = "vllm_responses.entrypoints.serve:main"
+vllm = "vllm_responses.entrypoints.vllm_cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "vllm_responses.version.__version__" }

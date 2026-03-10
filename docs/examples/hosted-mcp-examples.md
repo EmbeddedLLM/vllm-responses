@@ -4,10 +4,12 @@ Use MCP tools through the Responses API in either Built-in MCP mode or Remote MC
 
 ## Built-in MCP Runtime Config (`mcp.json`)
 
-Set `VR_MCP_CONFIG_PATH` to point to an MCP runtime config file:
+Pass `--mcp-config` (or `--responses-mcp-config` in integrated mode) to point to an MCP runtime config file:
 
 ```bash
---8<-- "snippets/mcp_enable_config_env.txt"
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --mcp-config /etc/vllm-responses/mcp.json
 ```
 
 Expected shape: top-level `mcpServers`, with each key as your `server_label` and each value as one MCP server entry.
@@ -21,11 +23,18 @@ Canonical example (`url` + `stdio` styles):
 
 Before sending tool requests, inspect runtime availability:
 
-Set `VR_MCP_CONFIG_PATH` and start with `vllm-responses serve` so the singleton Built-in MCP runtime is active.
+Start with a supported entrypoint that enables Built-in MCP:
+
+- `vllm-responses serve --mcp-config ...`
+- `vllm serve --responses --responses-mcp-config ...`
 
 ```bash
 --8<-- "snippets/mcp_discover_servers_tools_curl.txt"
 ```
+
+The snippet defaults to `http://127.0.0.1:5969`. In integrated mode, set
+`VLLM_RESPONSES_HTTP_BASE=http://127.0.0.1:8000` first, or replace the base URL with your
+configured `vllm serve` address.
 
 ## Built-in MCP: Force an MCP Tool Call
 

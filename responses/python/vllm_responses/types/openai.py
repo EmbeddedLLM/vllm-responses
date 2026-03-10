@@ -46,7 +46,6 @@ from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.toolsets.abstract import AbstractToolset
 from pydantic_extra_types.timezone_name import TimeZoneName
 
-from vllm_responses.configs import ENV_CONFIG
 from vllm_responses.mcp.gateway_toolset import McpGatewayToolset, ResolvedMcpTool
 from vllm_responses.mcp.resolver import (
     ResolvedMcpServerTools,
@@ -1384,6 +1383,8 @@ class vLLMResponsesRequest(BaseModel):
         self,
         *,
         builtin_mcp_runtime_client: BuiltinMcpRuntimeClient | None = None,
+        request_remote_enabled: bool,
+        request_remote_url_checks_enabled: bool,
     ) -> tuple[AgentRunSettings, list[Tool], dict[str, McpToolRef]]:
         """
         Converts the request into a dictionary of run settings for Pydantic AI.
@@ -1401,9 +1402,6 @@ class vLLMResponsesRequest(BaseModel):
         role: user
         ```
         """
-        request_remote_enabled = ENV_CONFIG.mcp_request_remote_enabled
-        request_remote_url_checks_enabled = ENV_CONFIG.mcp_request_remote_url_checks
-
         mcp_tool_name_map: dict[str, McpToolRef] = {}
         mcp_internal_name_by_ref: dict[McpToolRef, str] = {}
 

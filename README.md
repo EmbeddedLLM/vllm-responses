@@ -29,11 +29,18 @@ Download a prebuilt wheel (`vllm_responses-*.whl`) from GitHub Releases (preferr
 ```bash
 uv venv --python=3.12
 source .venv/bin/activate
+uv pip install vllm
 uv pip install path/to/vllm_responses-*.whl
 ```
 
 On Linux x86_64 wheels, the Code Interpreter server binary is bundled, so **Bun is not required**.
 Currently, wheels are only built for Linux x86_64.
+
+Installing `vllm-responses` provides:
+
+- `vllm-responses` for the standalone supervisor mode
+- `vllm` as a CLI shim that supports `vllm serve --responses` and delegates all non-Responses paths to the upstream
+  `vllm` Python package
 
 ### Install from source (repo checkout) (Development)
 
@@ -43,6 +50,7 @@ cd vllm-responses
 
 uv venv --python=3.12
 source .venv/bin/activate
+uv pip install vllm
 uv pip install -e ./responses
 
 # Development: enable Code Interpreter via Bun fallback
@@ -59,6 +67,7 @@ Verify installation:
 
 ```bash
 vllm-responses --help
+vllm --help
 ```
 
 ### Optional dependency sets (extras)
@@ -80,11 +89,10 @@ Available extras:
 
 ## Run
 
-### one-command local runtime (`vllm-responses serve`)
+### remote-upstream gateway mode (`vllm-responses serve`)
 
 Prereqs:
 
-- If you want to spawn vLLM: `vllm` must be installed (e.g. `uv pip install vllm`).
 - If `code_interpreter` is enabled (default), the first start may download the Pyodide runtime (~400MB) into a cache
     directory (see `VR_PYODIDE_CACHE_DIR`). This requires `tar` to be installed.
 - For non-Linux platforms (or source installs without the bundled binary), you can disable the tool via
@@ -97,15 +105,6 @@ External upstream (you start vLLM yourself; `/v1` is optional):
 vllm-responses serve --upstream http://127.0.0.1:8457
 ```
 
-Spawn vLLM (everything after `--` is forwarded to `vllm serve`):
-
-```bash
-vllm-responses serve --gateway-workers 4 -- \
-  meta-llama/Llama-3.2-3B-Instruct \
-  --dtype auto \
-  --port 8457
-```
-
 The Responses endpoint is:
 
 - `POST http://127.0.0.1:5969/v1/responses`
@@ -113,6 +112,29 @@ The Responses endpoint is:
 Remote access note:
 
 - If you bind the gateway with `--gateway-host 0.0.0.0`, use the machine’s IP/hostname to connect (not `0.0.0.0`).
+
+### integrated runtime (`vllm serve --responses`)
+
+Prereq:
+
+- install upstream `vllm` first, then install `vllm-responses` into the same environment
+
+Example:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3.5-0.8B \
+  --responses \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --host 0.0.0.0 \
+  --port 8457
+```
+
+CLI help:
+
+- `vllm serve --help` shows upstream vLLM help
+- `vllm serve --responses --help` shows the Responses-owned integrated flags
 
 ### Optional: ResponseStore hot cache (Redis)
 

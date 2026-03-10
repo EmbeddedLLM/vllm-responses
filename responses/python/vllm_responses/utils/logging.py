@@ -7,10 +7,14 @@ https://gist.github.com/nkhitrov/a3e31cfcc1b19cba8e1b626276148c49
 import inspect
 import logging
 import sys
+from typing import Final
 
 from loguru import logger
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.sources import EnvSource
+
+_DEFAULT_LOG_DIR: Final[str] = "logs"
+_DEFAULT_LOG_FILEPATH = object()
 
 
 class InterceptHandler(logging.Handler):
@@ -75,17 +79,15 @@ def suppress_logging_handlers(names: list[str], include_submodules: bool = True)
         lgg.setLevel("ERROR")
 
 
-def setup_logger_sinks(log_filepath: str | None = f"{ENV_CONFIG.log_dir}/vllm_responses.log"):
-    logger.remove()
-    logger.level("INFO", color="")
-    handlers = [
+def _build_loguru_handlers(*, log_filepath: str | None, enqueue: bool) -> list[dict[str, object]]:
+    handlers: list[dict[str, object]] = [
         {
             "sink": sys.stderr,
             "level": "INFO",
             "serialize": False,
             "backtrace": False,
             "diagnose": True,
-            "enqueue": True,
+            "enqueue": enqueue,
             "catch": True,
         },
     ]
@@ -97,11 +99,33 @@ def setup_logger_sinks(log_filepath: str | None = f"{ENV_CONFIG.log_dir}/vllm_re
                 "serialize": False,
                 "backtrace": False,
                 "diagnose": True,
-                "enqueue": True,
+                "enqueue": enqueue,
                 "catch": True,
                 "rotation": "50 MB",
                 "delay": False,
                 "watch": False,
             },
         )
-    logger.configure(handlers=handlers)
+    return handlers
+
+
+def _default_log_filepath() -> str:
+    env = EnvSource.from_env()
+    log_dir = env.get_str("VR_LOG_DIR", _DEFAULT_LOG_DIR).strip() or _DEFAULT_LOG_DIR
+    return f"{log_dir}/vllm_responses.log"
+
+
+def setup_logger_sinks(log_filepath: str | None | object = _DEFAULT_LOG_FILEPATH):
+    if log_filepath is _DEFAULT_LOG_FILEPATH:
+        log_filepath = _default_log_filepath()
+    logger.remove()
+    logger.level("INFO", color="")
+    try:
+        logger.configure(handlers=_build_loguru_handlers(log_filepath=log_filepath, enqueue=True))
+    except PermissionError:
+        logger.remove()
+        logger.configure(handlers=_build_loguru_handlers(log_filepath=log_filepath, enqueue=False))
+        print(
+            "[logging] enqueue=True unavailable; falling back to synchronous Loguru handlers.",
+            file=sys.stderr,
+        )

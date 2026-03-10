@@ -7,6 +7,8 @@ from fastapi.exceptions import RequestValidationError
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from vllm_responses.entrypoints._state import get_request_id
+
 
 def docstring_message(cls):
     """
@@ -82,6 +84,25 @@ class UnsupportedMediaTypeError(VRException):
 @docstring_message
 class BadInputError(VRException):
     """Your input is invalid."""
+
+
+class ResponsesAPIError(VRException):
+    """Responses/OpenAI-style API error."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        error_type: str = "invalid_request_error",
+        param: str | None = None,
+        code: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = int(status_code)
+        self.error_type = str(error_type)
+        self.param = param
+        self.code = code
 
 
 @docstring_message
@@ -209,7 +230,7 @@ def handle_exception(
             mssg = f"Failed to run {func.__name__}"
             mssg = f"{e.__class__.__name__}: {e} - {mssg} - kwargs={kwargs}"
             if request:
-                request_id = request.state.vllm_responses.id
+                request_id = get_request_id(request)
                 logger.error(f"{request_id} - {mssg}")
             else:
                 logger.error(mssg)

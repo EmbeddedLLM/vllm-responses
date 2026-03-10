@@ -7,6 +7,7 @@ from httpx import AsyncClient, HTTPStatusError, Response
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from tenacity import retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from vllm_responses.entrypoints._state import CURRENT_REQUEST_ID
 from vllm_responses.utils.types import JSONInput, JSONOutput
 
 
@@ -100,6 +101,12 @@ def _should_retry_status(response: Response) -> None:
         response.raise_for_status()  # This will raise HTTPStatusError
 
 
+async def _propagate_request_id(request) -> None:  # type: ignore[no-untyped-def]
+    request_id = CURRENT_REQUEST_ID.get()
+    if request_id and "x-request-id" not in request.headers:
+        request.headers["x-request-id"] = request_id
+
+
 def get_async_client(
     *,
     timeout: float = 30.0,
@@ -125,6 +132,7 @@ def get_async_client(
         timeout=timeout,
         follow_redirects=follow_redirects,
         max_redirects=max_redirects,
+        event_hooks={"request": [_propagate_request_id]},
         transport=AsyncTenacityTransport(
             config=retry_config,
             validate_response=_should_retry_status,

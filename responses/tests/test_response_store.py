@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.responses_core.store import DBResponseStore
 from vllm_responses.types.openai import (
     OpenAIOutputItem,
@@ -111,6 +113,29 @@ class _StubCache:
         self.set_calls += 1
 
 
+def _install_store_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    cache_enabled: bool,
+    cache_ttl_seconds: int = 3600,
+    workers: int = 1,
+) -> None:
+    import vllm_responses.responses_core.store as store_mod
+
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_LLM_API_BASE": "http://mock/v1",
+                "VR_RESPONSE_STORE_CACHE": "1" if cache_enabled else "0",
+                "VR_RESPONSE_STORE_CACHE_TTL_SECONDS": str(cache_ttl_seconds),
+                "VR_WORKERS": str(workers),
+                "VR_DB_PATH": "sqlite+aiosqlite:///ignored.db",
+            }
+        )
+    )
+    monkeypatch.setattr(store_mod, "_STORE_RUNTIME_CONFIG", runtime_config)
+
+
 @pytest.mark.anyio
 async def test_store_get_prefers_cache_when_enabled(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -121,11 +146,8 @@ async def test_store_get_prefers_cache_when_enabled(
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
     cache = _StubCache()
 
-    monkeypatch.setattr(store_mod, "CACHE", cache)
-    monkeypatch.setattr(store_mod.ENV_CONFIG, "response_store_cache", True, raising=False)
-    monkeypatch.setattr(
-        store_mod.ENV_CONFIG, "response_store_cache_ttl_seconds", 3600, raising=False
-    )
+    monkeypatch.setattr(store_mod, "_STORE_CACHE", cache)
+    _install_store_runtime_config(monkeypatch, cache_enabled=True)
 
     req = vLLMResponsesRequest(
         model="test-model", input=[{"role": "user", "content": "hi"}], tool_choice="none"
@@ -167,8 +189,8 @@ async def test_store_get_populates_cache_on_miss(tmp_path: Path, monkeypatch: py
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
     cache = _StubCache()
 
-    monkeypatch.setattr(store_mod, "CACHE", cache)
-    monkeypatch.setattr(store_mod.ENV_CONFIG, "response_store_cache", False, raising=False)
+    monkeypatch.setattr(store_mod, "_STORE_CACHE", cache)
+    _install_store_runtime_config(monkeypatch, cache_enabled=False)
 
     req = vLLMResponsesRequest(
         model="test-model", input=[{"role": "user", "content": "hi"}], tool_choice="none"
@@ -178,10 +200,7 @@ async def test_store_get_populates_cache_on_miss(tmp_path: Path, monkeypatch: py
     # Store in DB while cache is disabled (so we can test cache-aside on get()).
     await store.put_completed(request=req, hydrated_request=req, response=resp)
 
-    monkeypatch.setattr(store_mod.ENV_CONFIG, "response_store_cache", True, raising=False)
-    monkeypatch.setattr(
-        store_mod.ENV_CONFIG, "response_store_cache_ttl_seconds", 3600, raising=False
-    )
+    _install_store_runtime_config(monkeypatch, cache_enabled=True)
 
     stored = await store.get(response_id=resp.id)
     assert stored is not None
@@ -204,11 +223,8 @@ async def test_store_get_falls_back_to_db_on_cache_error(
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
     cache = _ExplodingCache()
 
-    monkeypatch.setattr(store_mod, "CACHE", cache)
-    monkeypatch.setattr(store_mod.ENV_CONFIG, "response_store_cache", True, raising=False)
-    monkeypatch.setattr(
-        store_mod.ENV_CONFIG, "response_store_cache_ttl_seconds", 3600, raising=False
-    )
+    monkeypatch.setattr(store_mod, "_STORE_CACHE", cache)
+    _install_store_runtime_config(monkeypatch, cache_enabled=True)
 
     req = vLLMResponsesRequest(
         model="test-model", input=[{"role": "user", "content": "hi"}], tool_choice="none"
@@ -219,6 +235,56 @@ async def test_store_get_falls_back_to_db_on_cache_error(
     stored = await store.get(response_id=resp.id)
     assert stored is not None
     assert stored.payload().response.id == resp.id
+
+    await store.aclose()
+
+
+@pytest.mark.anyio
+async def test_store_false_does_not_persist_response(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    req = vLLMResponsesRequest(
+        model="test-model",
+        input=[{"role": "user", "content": "hi"}],
+        tool_choice="none",
+        store=False,
+    )
+    resp = OpenAIResponsesResponse(model="test-model", status="completed", output=[])
+
+    await store.put_completed(request=req, hydrated_request=req, response=resp)
+
+    stored = await store.get(response_id=resp.id)
+    assert stored is None
+
+    await store.aclose()
+
+
+@pytest.mark.anyio
+async def test_store_false_does_not_populate_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import vllm_responses.responses_core.store as store_mod
+
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+    cache = _StubCache()
+
+    monkeypatch.setattr(store_mod, "_STORE_CACHE", cache)
+    _install_store_runtime_config(monkeypatch, cache_enabled=True)
+
+    req = vLLMResponsesRequest(
+        model="test-model",
+        input=[{"role": "user", "content": "hi"}],
+        tool_choice="none",
+        store=False,
+    )
+    resp = OpenAIResponsesResponse(model="test-model", status="completed", output=[])
+
+    await store.put_completed(request=req, hydrated_request=req, response=resp)
+
+    assert cache.set_calls == 0
+    assert await store.get(response_id=resp.id) is None
 
     await store.aclose()
 

@@ -4,7 +4,28 @@ from pathlib import Path
 
 import pytest
 
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.responses_core.store import DBResponseStore
+
+
+def _install_store_runtime_config(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    workers: int,
+) -> None:
+    import vllm_responses.responses_core.store as store_mod
+
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_LLM_API_BASE": "http://mock/v1",
+                "VR_WORKERS": str(workers),
+                "VR_DB_PATH": "sqlite+aiosqlite:///ignored.db",
+            }
+        )
+    )
+    monkeypatch.setattr(store_mod, "_STORE_RUNTIME_CONFIG", runtime_config)
 
 
 @pytest.mark.anyio
@@ -12,9 +33,7 @@ async def test_sqlite_multi_worker_schema_init_requires_supervisor(tmp_path: Pat
     db_path = tmp_path / "state.db"
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
 
-    import vllm_responses.responses_core.store as store_mod
-
-    monkeypatch.setattr(store_mod.ENV_CONFIG, "workers", 2, raising=False)
+    _install_store_runtime_config(monkeypatch, workers=2)
     monkeypatch.delenv("VR_DB_SCHEMA_READY", raising=False)
 
     with pytest.raises(

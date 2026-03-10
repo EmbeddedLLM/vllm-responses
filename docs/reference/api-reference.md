@@ -1,6 +1,6 @@
 # API Reference
 
-The gateway exposes a single primary endpoint compatible with the **OpenAI Responses API**.
+The gateway exposes a primary OpenAI Responses endpoint plus compatibility passthrough endpoints.
 
 !!! tip "Spec Conformance"
 
@@ -198,6 +198,44 @@ When generation stops due to output token limits or content filtering, Responses
 
 If `store=true` (default), both terminal statuses `completed` and `incomplete` are persisted and can be referenced by `previous_response_id`.
 
+If `store=false`, the response is not persisted. It cannot be retrieved later and cannot be used as a
+`previous_response_id`.
+
+______________________________________________________________________
+
+## Retrieve Response
+
+`GET /v1/responses/{response_id}`
+
+Retrieves a stored Responses object by ID.
+
+Behavior:
+
+- If the response exists in the ResponseStore, the gateway returns the stored `response` object.
+- If the response does not exist, the gateway returns `404 invalid_request_error`.
+- Responses created with `store=false` are not persisted, so retrieval returns not found.
+
+______________________________________________________________________
+
+## Passthrough Compatibility Endpoints
+
+The gateway also provides minimal passthrough routes for legacy OpenAI-compatible clients:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+Passthrough behavior:
+
+- Request and response payloads are forwarded as-is (no schema translation).
+- Streaming SSE payloads are forwarded without rewriting.
+- Upstream HTTP error payloads are returned unchanged.
+- Transport failures map to gateway errors:
+    - `502` with `error.code="upstream_unavailable"`
+    - `504` with `error.code="upstream_timeout"`
+
+These endpoints are compatibility routes only; stateful Responses features such as
+`previous_response_id` remain specific to `POST /v1/responses`.
+
 ______________________________________________________________________
 
 ## MCP Discovery Endpoints
@@ -234,6 +272,6 @@ Errors follow the standard OpenAI error format.
 | :---------- | :---------------------- | :-------------------------------------------- |
 | 400         | `invalid_request_error` | Invalid input or parameters.                  |
 | 401         | `authentication_error`  | Missing or invalid API key (if auth enabled). |
-| 404         | `invalid_request_error` | Unknown `previous_response_id` or model.      |
+| 404         | `invalid_request_error` | Unknown `response_id` or model.               |
 | 422         | `bad_input`             | Request contract validation failure.          |
 | 500         | `api_error`             | Internal server error.                        |

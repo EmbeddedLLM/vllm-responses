@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
-from vllm_responses.entrypoints._serve_spec import (
+from vllm_responses.configs.builders import build_runtime_config_for_supervisor
+from vllm_responses.configs.sources import EnvSource
+from vllm_responses.entrypoints._serve._runtime import run_serve_spec
+from vllm_responses.entrypoints._serve._spec import (
     DisabledCodeInterpreterSpec,
     ExternalUpstreamSpec,
     GatewaySpec,
@@ -13,7 +17,6 @@ from vllm_responses.entrypoints._serve_spec import (
     ServeSpec,
     TimeoutSpec,
 )
-from vllm_responses.entrypoints._serve_supervisor import run_serve_spec
 
 
 @dataclass
@@ -24,6 +27,9 @@ class _FakeProc:
     def poll(self) -> int | None:
         return self.poll_code
 
+    def wait(self) -> int:
+        return 0 if self.poll_code is None else self.poll_code
+
 
 class _FakeStore:
     async def ensure_schema(self) -> None:
@@ -31,7 +37,22 @@ class _FakeStore:
 
 
 def _base_spec(*, mcp_runtime: McpRuntimeSpec | None) -> ServeSpec:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=SimpleNamespace(
+            upstream="http://127.0.0.1:8457/v1",
+            gateway_host="127.0.0.1",
+            gateway_port=5969,
+            gateway_workers=1,
+            code_interpreter="disabled",
+            code_interpreter_port=None,
+            code_interpreter_workers=None,
+            mcp_config=None if mcp_runtime is None else "/tmp/mcp.json",
+            mcp_port=None if mcp_runtime is None else mcp_runtime.port,
+        ),
+        env=EnvSource(environ={}),
+    )
     return ServeSpec(
+        runtime_config=runtime_config,
         notices=[],
         gateway=GatewaySpec(host="127.0.0.1", port=5969, workers=1),
         mcp_runtime=mcp_runtime,
@@ -44,8 +65,8 @@ def _base_spec(*, mcp_runtime: McpRuntimeSpec | None) -> ServeSpec:
         code_interpreter_workers=0,
         metrics=MetricsSpec(enabled=False),
         timeouts=TimeoutSpec(
-            vllm_startup_timeout_s=10.0,
-            vllm_ready_interval_s=1.0,
+            upstream_ready_timeout_s=10.0,
+            upstream_ready_interval_s=1.0,
             code_interpreter_startup_timeout_s=10.0,
         ),
     )
@@ -54,7 +75,8 @@ def _base_spec(*, mcp_runtime: McpRuntimeSpec | None) -> ServeSpec:
 def _patch_supervisor_runtime_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[dict[str, object]]:
-    import vllm_responses.entrypoints._serve_supervisor as supervisor_module
+    import vllm_responses.entrypoints._helper_runtime as helper_runtime_module
+    import vllm_responses.entrypoints._serve._runtime as supervisor_module
     import vllm_responses.responses_core.store as store_module
 
     popen_calls: list[dict[str, object]] = []
@@ -75,11 +97,12 @@ def _patch_supervisor_runtime_dependencies(
         return proc
 
     monkeypatch.setattr(store_module, "get_default_response_store", lambda: _FakeStore())
-    monkeypatch.setattr(supervisor_module.subprocess, "Popen", _fake_popen)
     monkeypatch.setattr(supervisor_module, "wait_http_ready", lambda *args, **kwargs: None)
+    monkeypatch.setattr(helper_runtime_module, "wait_http_ready", lambda *args, **kwargs: None)
     monkeypatch.setattr(supervisor_module, "is_port_available", lambda *args, **kwargs: True)
-    monkeypatch.setattr(supervisor_module, "terminate_process", lambda *args, **kwargs: None)
-    monkeypatch.setattr(supervisor_module, "stream_lines", lambda *args, **kwargs: None)
+    monkeypatch.setattr(helper_runtime_module.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(helper_runtime_module, "terminate_process", lambda *args, **kwargs: None)
+    monkeypatch.setattr(helper_runtime_module, "stream_lines", lambda *args, **kwargs: None)
 
     return popen_calls
 
@@ -92,12 +115,12 @@ def test_run_serve_spec_without_mcp_runtime_does_not_spawn_or_inject(
 
     code = run_serve_spec(spec)
 
-    assert code == 1
+    assert code == 0
     assert len(popen_calls) == 1
     assert popen_calls[0]["is_mcp_runtime"] is False
     gateway_env = popen_calls[0]["env"]
     assert isinstance(gateway_env, dict)
-    assert "VR_MCP_BUILTIN_RUNTIME_URL" not in gateway_env
+    assert "VR_RESPONSES_RUNTIME_MODE" not in gateway_env
 
 
 def test_run_serve_spec_with_mcp_runtime_spawns_and_injects(
@@ -114,12 +137,16 @@ def test_run_serve_spec_with_mcp_runtime_spawns_and_injects(
 
     code = run_serve_spec(spec)
 
-    assert code == 1
+    assert code == 0
     assert len(popen_calls) == 2
     assert any(call["is_mcp_runtime"] is True for call in popen_calls)
+    mcp_runtime_calls = [call for call in popen_calls if call["is_mcp_runtime"] is True]
+    assert len(mcp_runtime_calls) == 1
+    assert mcp_runtime_calls[0]["env"]["VR_MCP_CONFIG_PATH"] == "/tmp/mcp.json"
 
     gateway_calls = [call for call in popen_calls if call["is_mcp_runtime"] is False]
     assert len(gateway_calls) == 1
     gateway_env = gateway_calls[0]["env"]
     assert isinstance(gateway_env, dict)
     assert gateway_env.get("VR_MCP_BUILTIN_RUNTIME_URL") == "http://127.0.0.1:5981"
+    assert "VR_RESPONSES_RUNTIME_MODE" not in gateway_env

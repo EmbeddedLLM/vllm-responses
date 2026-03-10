@@ -13,7 +13,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.retries import RetryConfig
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.runtime import INTERNAL_UPSTREAM_HEADER_NAME, RuntimeConfig
 from vllm_responses.lm_failures import (
     FailureCounters as _FailureCounters,
 )
@@ -33,6 +33,7 @@ from vllm_responses.responses_core.normalizer import PydanticAINormalizer
 from vllm_responses.responses_core.sse import stream_responses_sse
 from vllm_responses.responses_core.store import ResponseStore, get_default_response_store
 from vllm_responses.tools import CODE_INTERPRETER_TOOL
+from vllm_responses.tools.code_interpreter import bind_runtime_config
 from vllm_responses.types.openai import (
     AgentRunSettings,
     OpenAIResponsesError,
@@ -48,17 +49,22 @@ from vllm_responses.utils.exceptions import BadInputError
 from vllm_responses.utils.io import get_async_client
 
 LM_CLIENT = get_async_client()
+INTEGRATED_LM_CLIENT = get_async_client()
+INTEGRATED_LM_CLIENT.headers[INTERNAL_UPSTREAM_HEADER_NAME] = "1"
 
 
 def get_openai_provider(
-    base_url: str = ENV_CONFIG.llm_api_base,
+    runtime_config: RuntimeConfig,
+    base_url: str | None = None,
     *,
-    api_key: str = ENV_CONFIG.openai_api_key_plain,
+    api_key: str | None = None,
 ) -> OpenAIProvider:
     return OpenAIProvider(
-        api_key=api_key,
-        base_url=base_url,
-        http_client=LM_CLIENT,
+        api_key=(runtime_config.openai_api_key or "") if api_key is None else api_key,
+        base_url=runtime_config.llm_api_base if base_url is None else base_url,
+        http_client=INTEGRATED_LM_CLIENT
+        if runtime_config.runtime_mode == "integrated"
+        else LM_CLIENT,
     )
 
 
@@ -78,17 +84,19 @@ class LMEngine:
         retry_config: RetryConfig | None = None,
         store: ResponseStore | None = None,
         builtin_mcp_runtime_client: BuiltinMcpRuntimeClient | None = None,
+        runtime_config: RuntimeConfig,
     ) -> None:
         self._body = body
         self._store = store or get_default_response_store()
         self._builtin_mcp_runtime_client = builtin_mcp_runtime_client
+        self._runtime_config = runtime_config
         self._hydrated_body: vLLMResponsesRequest | None = None
         # NOTE: the installed `pydantic_ai` version in this repo does not accept `retry_config`
         # on `OpenAIProvider.__init__`. Keep the parameter for future use, but do not pass it.
         self._agent = Agent(
             OpenAIChatModel(
                 model_name=body.model,
-                provider=get_openai_provider(),
+                provider=get_openai_provider(runtime_config),
             ),
             model_settings=body.as_openai_chat_settings(),
         )
@@ -180,6 +188,8 @@ class LMEngine:
         self._hydrated_body = hydrated_body
         run_settings, builtin_tools, mcp_tool_name_map = await hydrated_body.as_run_settings(
             builtin_mcp_runtime_client=self._builtin_mcp_runtime_client,
+            request_remote_enabled=self._runtime_config.mcp_request_remote_enabled,
+            request_remote_url_checks_enabled=self._runtime_config.mcp_request_remote_url_checks,
         )
         builtin_tool_names = {t.name for t in builtin_tools}
 
@@ -212,17 +222,18 @@ class LMEngine:
 
         with capture_run_messages() as messages:
             try:
-                async for event in self._agent.run_stream_events(
-                    output_type=[self._agent.output_type, DeferredToolRequests],
-                    message_history=run_settings["message_history"],
-                    instructions=run_settings["instructions"],
-                    toolsets=run_settings["toolsets"],
-                    usage_limits=run_settings["usage_limits"],
-                ):
-                    for normalized in normalizer.on_event(event):
-                        failure_counters.observe(normalized)
-                        for out in composer.feed(normalized):
-                            yield out
+                with bind_runtime_config(self._runtime_config):
+                    async for event in self._agent.run_stream_events(
+                        output_type=[self._agent.output_type, DeferredToolRequests],
+                        message_history=run_settings["message_history"],
+                        instructions=run_settings["instructions"],
+                        toolsets=run_settings["toolsets"],
+                        usage_limits=run_settings["usage_limits"],
+                    ):
+                        for normalized in normalizer.on_event(event):
+                            failure_counters.observe(normalized)
+                            for out in composer.feed(normalized):
+                                yield out
             except (ModelHTTPError, UnexpectedModelBehavior) as e:
                 details = _extract_failure_details(e)
                 _log_failure_summary(
@@ -238,6 +249,7 @@ class LMEngine:
                     messages=messages,
                     counters=failure_counters,
                     upstream_error_raw=details.upstream_error_raw,
+                    log_model_messages=self._runtime_config.log_model_messages,
                 )
                 raise
 
@@ -260,17 +272,18 @@ class LMEngine:
 
         with capture_run_messages() as messages:
             try:
-                async for event in self._agent.run_stream_events(
-                    output_type=[self._agent.output_type, DeferredToolRequests],
-                    message_history=run_settings["message_history"],
-                    instructions=run_settings["instructions"],
-                    toolsets=run_settings["toolsets"],
-                    usage_limits=run_settings["usage_limits"],
-                ):
-                    for normalized in normalizer.on_event(event):
-                        failure_counters.observe(normalized)
-                        for out in composer.feed(normalized):
-                            yield out
+                with bind_runtime_config(self._runtime_config):
+                    async for event in self._agent.run_stream_events(
+                        output_type=[self._agent.output_type, DeferredToolRequests],
+                        message_history=run_settings["message_history"],
+                        instructions=run_settings["instructions"],
+                        toolsets=run_settings["toolsets"],
+                        usage_limits=run_settings["usage_limits"],
+                    ):
+                        for normalized in normalizer.on_event(event):
+                            failure_counters.observe(normalized)
+                            for out in composer.feed(normalized):
+                                yield out
             except (ModelHTTPError, UnexpectedModelBehavior) as e:
                 details = _extract_failure_details(e)
                 _log_failure_summary(
@@ -286,6 +299,7 @@ class LMEngine:
                     messages=messages,
                     counters=failure_counters,
                     upstream_error_raw=details.upstream_error_raw,
+                    log_model_messages=self._runtime_config.log_model_messages,
                 )
                 yield OpenAIResponsesError(
                     code=details.code,

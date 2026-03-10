@@ -75,7 +75,7 @@ The default configuration runs one worker process.
 Increase concurrency by running multiple worker processes.
 
 ```bash
-vllm-responses serve --gateway-workers 4 --upstream http://127.0.0.1:8457
+vllm-responses serve --gateway-workers 4 --upstream http://127.0.0.1:8000/v1
 ```
 
 **What this does:**
@@ -88,6 +88,19 @@ vllm-responses serve --gateway-workers 4 --upstream http://127.0.0.1:8457
 
 - **SQLite:** Works fine with multiple workers on the same machine (uses WAL mode for concurrent access)
 - **PostgreSQL:** Required for multiple workers across multiple machines (Kubernetes, multi-VM setups)
+
+### Upstream Readiness Controls
+
+Tune how long the supervisor waits for an external upstream to become ready.
+
+```bash
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --upstream-ready-timeout 900 \
+  --upstream-ready-interval 2
+```
+
+Use these when the upstream has a slow cold start or when you want faster failure detection during rollout.
 
 ______________________________________________________________________
 
@@ -120,13 +133,14 @@ ______________________________________________________________________
 
 ## MCP Configuration (Optional)
 
-Enable Built-in MCP by providing a runtime config file and setting `VR_MCP_CONFIG_PATH`.
+Enable Built-in MCP by providing a runtime config file on the active entrypoint.
 
 ### Minimal Setup
 
 ```bash
---8<-- "snippets/mcp_enable_config_env.txt"
---8<-- "snippets/serve_external_upstream_cmd.txt"
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --mcp-config /etc/vllm-responses/mcp.json
 ```
 
 For `mcp.json` examples (URL + stdio styles), see
@@ -134,7 +148,7 @@ For `mcp.json` examples (URL + stdio styles), see
 
 ### Operational Notes
 
-- If `VR_MCP_CONFIG_PATH` is unset, Built-in MCP is disabled.
+- If `--mcp-config` is omitted, Built-in MCP is disabled.
 - With `vllm-responses serve`, Built-in MCP runs in a singleton internal runtime process shared by all gateway workers.
 - The supervisor injects `VR_MCP_BUILTIN_RUNTIME_URL` for gateway workers automatically.
 - Built-in MCP startup and call timeouts are configured globally:
@@ -174,41 +188,41 @@ Warning: disabling URL checks increases SSRF and unsafe-endpoint risk and should
 
 The gateway can run in different architectural configurations depending on your scaling and operational needs.
 
-### Single-Command Runtime (Default)
+### Integrated Single-Command Runtime
 
-The `serve` command runs the gateway with managed local components by default.
+Use `vllm serve --responses` when you want the colocated local stack on one public API server.
 
 ```bash
-vllm-responses serve -- meta-llama/Llama-3.2-3B-Instruct --port 8457
+vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 ```
 
 **Components:**
 
-- vLLM subprocess
-- Gateway (1+ workers)
-- Code interpreter subprocess
-- Built-in MCP integration (optional, when `VR_MCP_CONFIG_PATH` is set)
-    - runs as a singleton loopback runtime process shared by all gateway workers
+- vLLM API server
+- Gateway routes mounted into the same FastAPI app
+- Code interpreter helper runtime (optional)
+- Built-in MCP integration (optional, when `--responses-mcp-config` is set)
+    - runs as a loopback helper runtime when enabled
 
-### Disaggregated
-
-Run each component separately for flexibility and independent scaling.
-
-#### Gateway + External vLLM
-
-Use an existing vLLM deployment or scale inference separately from the gateway.
+Integrated mode example with Built-in MCP:
 
 ```bash
-# Somewhere else: vLLM is already running
-vllm serve meta-llama/Llama-3.2-3B-Instruct --port 8457
+vllm serve meta-llama/Llama-3.2-3B-Instruct \
+  --responses \
+  --responses-mcp-config /etc/vllm-responses/mcp.json
+```
 
-# Gateway points to external vLLM
---8<-- "snippets/serve_external_upstream_cmd.txt"
+### Remote-Upstream Gateway Mode
+
+Use `vllm-responses serve` when inference and gateway should remain separate.
+
+```bash
+vllm-responses serve --upstream http://127.0.0.1:8000/v1
 ```
 
 **When to use:**
 
-- Separate of inference and gateway
+- Separate scaling of inference and gateway
 - Using existing vLLM infrastructure
 - Avoiding model reload when restarting gateway
 
@@ -216,15 +230,15 @@ ______________________________________________________________________
 
 ## Configuration Quick Reference
 
-| Configuration             | Command/Environment                             |
-| ------------------------- | ----------------------------------------------- |
-| **Database (PostgreSQL)** | `export VR_DB_PATH="postgresql+asyncpg://..."`  |
-| **Multiple workers**      | `--gateway-workers 4`                           |
-| **Redis cache**           | `export VR_RESPONSE_STORE_CACHE=1`              |
-| **Built-in MCP config**   | `export VR_MCP_CONFIG_PATH="/path/mcp.json"`    |
-| **Remote MCP**            | `export VR_MCP_REQUEST_REMOTE_ENABLED=false`    |
-| **Remote URL checks**     | `export VR_MCP_REQUEST_REMOTE_URL_CHECKS=false` |
-| **External vLLM**         | `--upstream http://vllm:8000`                   |
+| Configuration             | Command/Environment                                                      |
+| ------------------------- | ------------------------------------------------------------------------ |
+| **Database (PostgreSQL)** | `export VR_DB_PATH="postgresql+asyncpg://..."`                           |
+| **Multiple workers**      | `--gateway-workers 4`                                                    |
+| **Redis cache**           | `export VR_RESPONSE_STORE_CACHE=1`                                       |
+| **Built-in MCP config**   | `--mcp-config /path/mcp.json` or `--responses-mcp-config /path/mcp.json` |
+| **Remote MCP**            | `export VR_MCP_REQUEST_REMOTE_ENABLED=false`                             |
+| **Remote URL checks**     | `export VR_MCP_REQUEST_REMOTE_URL_CHECKS=false`                          |
+| **External vLLM**         | `--upstream http://vllm:8000/v1`                                         |
 
 ______________________________________________________________________
 

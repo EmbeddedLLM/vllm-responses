@@ -36,7 +36,7 @@ ______________________________________________________________________
 
 ## Documentation Map
 
-- **[Usage](usage/command-reference.md)**: CLI reference and streaming guide.
+- **[Usage](usage/running-the-gateway.md)**: Choose a runtime mode and get the gateway running before diving into flags.
 - **[Features](features/statefulness.md)**: Deep dive into statefulness, built-in tools, and MCP integration.
 - **[Reference](reference/api-reference.md)**: API endpoint details, configuration variables, and event schemas.
 - **[Deployment](deployment/configuration.md)**: Production configuration.

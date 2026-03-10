@@ -7,25 +7,16 @@ from pathlib import Path
 
 import pytest
 
+from vllm_responses.configs.sources import EnvSource
+from vllm_responses.configs.startup import find_flag_value
 from vllm_responses.entrypoints._serve_utils import (
-    EnvLookup,
     cleanup_prometheus_multiproc_dir,
     cleanup_stale_prometheus_multiproc_dirs,
     create_prometheus_multiproc_dir,
-    find_flag_value,
     is_port_available,
-    is_ready_url_host,
-    normalize_upstream,
-    read_dotenv,
     wait_http_ready,
 )
-
-
-def test_normalize_upstream_appends_v1() -> None:
-    assert normalize_upstream("http://localhost:8457") == "http://localhost:8457/v1"
-    assert normalize_upstream("http://localhost:8457/") == "http://localhost:8457/v1"
-    assert normalize_upstream("http://localhost:8457/v1") == "http://localhost:8457/v1"
-    assert normalize_upstream("http://localhost:8457/v1/") == "http://localhost:8457/v1"
+from vllm_responses.utils.urls import is_ready_url_host
 
 
 def test_find_flag_value_supports_space_and_equals() -> None:
@@ -43,33 +34,8 @@ def test_is_ready_url_host() -> None:
     assert is_ready_url_host("192.168.1.2") == "192.168.1.2"
 
 
-def test_read_dotenv_parses_basic_kv(tmp_path: Path) -> None:
-    env_path = tmp_path / ".env"
-    env_path.write_text(
-        "\n".join(
-            [
-                "# comment",
-                "VR_FOO=bar",
-                "VR_QUOTED='baz'",
-                'VR_DQUOTED="qux"',
-                "INVALID_LINE",
-                " =missing_key",
-                "VR_EMPTY=",
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    parsed = read_dotenv(env_path)
-    assert parsed["VR_FOO"] == "bar"
-    assert parsed["VR_QUOTED"] == "baz"
-    assert parsed["VR_DQUOTED"] == "qux"
-    assert parsed["VR_EMPTY"] == ""
-    assert "INVALID_LINE" not in parsed
-
-
-def test_envlookup_prefers_os_environ_over_dotenv() -> None:
-    lookup = EnvLookup(environ={"A": "1"}, dotenv={"A": "2", "B": "3"})
+def test_envlookup_reads_environment_values() -> None:
+    lookup = EnvSource(environ={"A": "1", "B": "3"})
     assert lookup.get("A") == ("1", True)
     assert lookup.get("B") == ("3", True)
     assert lookup.get("C") == (None, False)
@@ -81,7 +47,7 @@ def test_envlookup_prefers_os_environ_over_dotenv() -> None:
 
 
 def test_envlookup_typed_getters_handle_empty_and_invalid_values() -> None:
-    lookup = EnvLookup(environ={"A": "", "B": "not-an-int", "C": "nope"}, dotenv={"A": "1"})
+    lookup = EnvSource(environ={"A": "", "B": "not-an-int", "C": "nope"})
     assert lookup.get_int("A", 7) == 7
     with pytest.raises(ValueError, match=r"invalid B="):
         lookup.get_int("B", 0)
@@ -183,16 +149,21 @@ async def test_sqlite_engine_pragmas_do_not_crash(tmp_path):
     # Regression: SQLite PRAGMAs (notably `journal_mode=WAL`) must not fail due to running
     # "within a transaction" on async sqlite drivers.
     from vllm_responses import db as vllm_responses_db
-    from vllm_responses.configs import ENV_CONFIG
+    from vllm_responses.configs.builders import build_runtime_config_for_standalone
 
-    original_db_path = ENV_CONFIG.db_path
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_LLM_API_BASE": "http://mock/v1",
+                "VR_DB_PATH": f"sqlite+aiosqlite:///{tmp_path / 'pragmas.db'}",
+            }
+        )
+    )
+    vllm_responses_db.configure_db(runtime_config)
+    engine = vllm_responses_db.create_db_engine_async(runtime_config)
     try:
-        ENV_CONFIG.db_path = f"sqlite+aiosqlite:///{tmp_path / 'pragmas.db'}"
-        vllm_responses_db.create_db_engine_async.cache_clear()
-        engine = vllm_responses_db.create_db_engine_async()
         async with engine.connect() as conn:
             await conn.exec_driver_sql("SELECT 1")
-        await engine.dispose()
     finally:
-        ENV_CONFIG.db_path = original_db_path
+        await engine.dispose()
         vllm_responses_db.create_db_engine_async.cache_clear()

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException
 
+from vllm_responses.entrypoints._state import get_request_id
 from vllm_responses.utils import mask_string
 from vllm_responses.utils.exceptions import (
     AuthorizationError,
@@ -23,6 +24,7 @@ from vllm_responses.utils.exceptions import (
     RateLimitExceedError,
     ResourceExistsError,
     ResourceNotFoundError,
+    ResponsesAPIError,
     ServerBusyError,
     UnavailableError,
     UnsupportedMediaTypeError,
@@ -47,7 +49,7 @@ def make_request_log_str(request: Request, status_code: int | None = None) -> st
     """
     query = request.url.query
     query = f"?{query}" if query else ""
-    msg = f'{request.state.vllm_responses.id} - "{request.method} {request.url.path}{query}"'
+    msg = f'{get_request_id(request)} - "{request.method} {request.url.path}{query}"'
     if status_code is not None:
         msg = f"{msg} {status_code}"
     return msg
@@ -85,7 +87,8 @@ def make_response(
         detail = f"{message}\nException:{repr(exception)}"
     if headers is None:
         headers = {}
-    headers["x-request-id"] = request.headers.get("x-request-id", "")
+    request_id = get_request_id(request)
+    headers["x-request-id"] = request_id
     request_headers = {k.lower(): v for k, v in request.headers.items()}
     token = request_headers.get("authorization", "")
     if token.lower().startswith("bearer "):
@@ -101,7 +104,7 @@ def make_response(
             "error": error,
             "message": message,
             "detail": detail,
-            "request_id": request.state.vllm_responses.id,
+            "request_id": request_id,
             "exception": exception.__class__.__name__ if exception else None,
             "request_headers": request_headers,
         },
@@ -127,16 +130,63 @@ def make_response(
     return response
 
 
+def make_openai_error_response(
+    request: Request,
+    *,
+    message: str,
+    error_type: str,
+    status_code: int,
+    param: str | None,
+    code: str | None,
+    headers: Mapping[str, str] | None = None,
+    exception: Exception | None = None,
+    log: bool = True,
+) -> ORJSONResponse:
+    if headers is None:
+        headers = {}
+    headers = dict(headers)
+    headers["x-request-id"] = get_request_id(request)
+    response = ORJSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": param,
+                "code": code,
+            }
+        },
+        headers=headers,
+    )
+    if not log:
+        return response
+    message_line = make_request_log_str(request, response.status_code)
+    if exception is None:
+        logger.info(message_line)
+    elif status_code >= 500:
+        logger.warning(f"{message_line} - {exception.__class__.__name__}: {exception}")
+    else:
+        logger.info(f"{message_line} - {exception.__class__.__name__}: {exception}")
+    return response
+
+
 class Wrapper(BaseModel):
     body: Any
 
 
-async def _request_validation_exc_handler(request: Request, exc: RequestValidationError):
+async def _request_validation_exc_handler(
+    request: Request,
+    exc: RequestValidationError,
+    *,
+    log: bool = True,
+):
+    request_id = get_request_id(request)
     content = None
     try:
-        logger.info(
-            f"{make_request_log_str(request, 422)} - RequestValidationError: {exc.errors()}"
-        )
+        if log:
+            logger.info(
+                f"{make_request_log_str(request, 422)} - RequestValidationError: {exc.errors()}"
+            )
         errors, messages = [], []
         for i, e in enumerate(exc.errors()):
             try:
@@ -172,20 +222,20 @@ async def _request_validation_exc_handler(request: Request, exc: RequestValidati
             "error": "validation_error",
             "message": message,
             "detail": errors,
-            "request_id": request.state.vllm_responses.id,
+            "request_id": request_id,
             "exception": "",
             **Wrapper(body=exc.body).model_dump(),
         }
         return ORJSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=content,
+            headers={"x-request-id": request_id},
         )
     except Exception:
         if content is None:
             content = repr(exc)
-        logger.exception(
-            f"{request.state.vllm_responses.id} - Failed to parse error data: {content}"
-        )
+        if log:
+            logger.exception(f"{request_id} - Failed to parse error data: {content}")
         message = str(exc)
         return ORJSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -194,9 +244,10 @@ async def _request_validation_exc_handler(request: Request, exc: RequestValidati
                 "error": "validation_error",
                 "message": message,
                 "detail": message,
-                "request_id": request.state.vllm_responses.id,
+                "request_id": request_id,
                 "exception": exc.__class__.__name__,
             },
+            headers={"x-request-id": request_id},
         )
 
 
@@ -211,9 +262,20 @@ async def path_not_found_handler(request: Request, e: HTTPException):
     )
 
 
-async def exception_handler(request: Request, e: Exception):
+async def exception_handler(request: Request, e: Exception, *, log: bool = True):
     if isinstance(e, RequestValidationError):
-        return await _request_validation_exc_handler(request, e)
+        return await _request_validation_exc_handler(request, e, log=log)
+    elif isinstance(e, ResponsesAPIError):
+        return make_openai_error_response(
+            request=request,
+            message=str(e),
+            error_type=e.error_type,
+            status_code=e.status_code,
+            param=e.param,
+            code=e.code,
+            exception=e,
+            log=log,
+        )
     # elif isinstance(e, ValidationError):
     #     raise RequestValidationError(errors=e.errors()) from e
     elif isinstance(e, AuthorizationError):
@@ -223,6 +285,7 @@ async def exception_handler(request: Request, e: Exception):
             error="unauthorized",
             status_code=status.HTTP_401_UNAUTHORIZED,
             exception=e,
+            log=log,
         )
     elif isinstance(e, ExternalAuthError):
         return make_response(
@@ -231,6 +294,7 @@ async def exception_handler(request: Request, e: Exception):
             error="external_authentication_failed",
             status_code=status.HTTP_401_UNAUTHORIZED,
             exception=e,
+            log=log,
         )
     elif isinstance(e, PermissionError):
         return make_response(
@@ -239,6 +303,7 @@ async def exception_handler(request: Request, e: Exception):
             error="resource_protected",
             status_code=status.HTTP_403_FORBIDDEN,
             exception=e,
+            log=log,
         )
     elif isinstance(e, ForbiddenError):
         return make_response(
@@ -247,6 +312,7 @@ async def exception_handler(request: Request, e: Exception):
             error="forbidden",
             status_code=status.HTTP_403_FORBIDDEN,
             exception=e,
+            log=log,
         )
     elif isinstance(e, UpgradeTierError):
         return make_response(
@@ -255,6 +321,7 @@ async def exception_handler(request: Request, e: Exception):
             error="upgrade_tier",
             status_code=status.HTTP_403_FORBIDDEN,
             exception=e,
+            log=log,
         )
     elif isinstance(e, InsufficientCreditsError):
         return make_response(
@@ -263,6 +330,7 @@ async def exception_handler(request: Request, e: Exception):
             error="insufficient_credits",
             status_code=status.HTTP_403_FORBIDDEN,
             exception=e,
+            log=log,
         )
     elif isinstance(e, BudgetExceededError):
         return make_response(
@@ -271,6 +339,7 @@ async def exception_handler(request: Request, e: Exception):
             error="budget_exceeded",
             status_code=status.HTTP_403_FORBIDDEN,
             exception=e,
+            log=log,
         )
     elif isinstance(e, (ResourceNotFoundError, FileNotFoundError)):
         return make_response(
@@ -279,6 +348,7 @@ async def exception_handler(request: Request, e: Exception):
             error="resource_not_found",
             status_code=status.HTTP_404_NOT_FOUND,
             exception=e,
+            log=log,
         )
     elif isinstance(e, MethodNotAllowedError):
         return make_response(
@@ -287,6 +357,7 @@ async def exception_handler(request: Request, e: Exception):
             error="method_not_allowed",
             status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
             exception=e,
+            log=log,
         )
     elif isinstance(e, (ResourceExistsError, FileExistsError)):
         return make_response(
@@ -295,6 +366,7 @@ async def exception_handler(request: Request, e: Exception):
             error="resource_exists",
             status_code=status.HTTP_409_CONFLICT,
             exception=e,
+            log=log,
         )
     elif isinstance(e, UnsupportedMediaTypeError):
         return make_response(
@@ -303,6 +375,7 @@ async def exception_handler(request: Request, e: Exception):
             error="unsupported_media_type",
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             exception=e,
+            log=log,
         )
     elif isinstance(e, BadInputError):
         return make_response(
@@ -311,6 +384,7 @@ async def exception_handler(request: Request, e: Exception):
             error="bad_input",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             exception=e,
+            log=log,
         )
     elif isinstance(e, ContextOverflowError):
         return make_response(
@@ -319,6 +393,7 @@ async def exception_handler(request: Request, e: Exception):
             error="context_overflow",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             exception=e,
+            log=log,
         )
     elif isinstance(e, RateLimitExceedError):
         retry_after = "30" if e.retry_after is None else str(e.retry_after)
@@ -338,6 +413,7 @@ async def exception_handler(request: Request, e: Exception):
                 "X-RateLimit-Used": used,
                 "X-RateLimit-Meta": meta,
             },
+            log=log,
         )
     elif isinstance(e, UnavailableError):
         return make_response(
@@ -346,6 +422,7 @@ async def exception_handler(request: Request, e: Exception):
             error="not_implemented",
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             exception=e,
+            log=log,
         )
     elif isinstance(e, ServerBusyError):
         return make_response(
@@ -355,6 +432,7 @@ async def exception_handler(request: Request, e: Exception):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             exception=e,
             headers={"Retry-After": "30"},
+            log=log,
         )
     elif isinstance(e, ModelOverloadError):
         return make_response(
@@ -364,6 +442,7 @@ async def exception_handler(request: Request, e: Exception):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             exception=e,
             headers={"Retry-After": "30"},
+            log=log,
         )
     elif isinstance(e, HTTPException):
         return make_response(
@@ -372,7 +451,7 @@ async def exception_handler(request: Request, e: Exception):
             error="http_error",
             status_code=e.status_code,
             exception=e,
-            log=e.status_code != 404,
+            log=log and e.status_code != 404,
         )
     elif isinstance(e, IntegrityError):
         err_mssg: str = e.args[0]
@@ -385,6 +464,7 @@ async def exception_handler(request: Request, e: Exception):
                 error="resource_exists",
                 status_code=status.HTTP_409_CONFLICT,
                 exception=e,
+                log=log,
             )
         else:
             return make_response(
@@ -393,6 +473,7 @@ async def exception_handler(request: Request, e: Exception):
                 error="unexpected_error",
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 exception=e,
+                log=log,
             )
     else:
         return make_response(
@@ -401,4 +482,5 @@ async def exception_handler(request: Request, e: Exception):
             error="unexpected_error",
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             exception=e,
+            log=log,
         )

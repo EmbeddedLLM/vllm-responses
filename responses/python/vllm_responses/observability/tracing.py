@@ -5,20 +5,23 @@ from collections.abc import Callable
 from fastapi import FastAPI
 from loguru import logger
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.runtime import RuntimeConfig
 from vllm_responses.utils import uuid7_str
 
 _TRACING_CONFIGURED = False
 _HTTPX_INSTRUMENTED = False
 
 
-def configure_tracing(app: FastAPI | None = None) -> Callable[[], None]:
+def configure_tracing(
+    runtime_config: RuntimeConfig,
+    app: FastAPI | None = None,
+) -> Callable[[], None]:
     """
     Configure OpenTelemetry tracing (OTLP gRPC exporter), gated by `VR_TRACING_ENABLED`.
 
     Returns a shutdown callback that flushes and shuts down providers.
     """
-    if not ENV_CONFIG.tracing_enabled:
+    if not runtime_config.tracing_enabled:
         return lambda: None
 
     try:
@@ -39,13 +42,15 @@ def configure_tracing(app: FastAPI | None = None) -> Callable[[], None]:
     shutdown_callbacks: list[Callable[[], None]] = []
 
     if not _TRACING_CONFIGURED:
-        endpoint = f"http://{ENV_CONFIG.opentelemetry_host}:{ENV_CONFIG.opentelemetry_port}"
-        ratio = float(ENV_CONFIG.tracing_sample_ratio)
+        endpoint = (
+            f"http://{runtime_config.opentelemetry_host}:{runtime_config.opentelemetry_port}"
+        )
+        ratio = float(runtime_config.tracing_sample_ratio)
         ratio = 0.0 if ratio < 0.0 else 1.0 if ratio > 1.0 else ratio
 
         resource = Resource.create(
             {
-                "service.name": ENV_CONFIG.otel_service_name,
+                "service.name": runtime_config.otel_service_name,
                 "service.instance.id": uuid7_str(),
             }
         )

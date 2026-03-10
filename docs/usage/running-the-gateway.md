@@ -2,74 +2,86 @@
 
 This guide covers the different ways to run `vLLM Responses` in various environments.
 
+For a task-first reading order, start here, then use the
+[Command Reference](command-reference.md) for the full option-by-option CLI surface.
+
 ## Supported entrypoint (important)
 
-We recommend running the gateway via `vllm-responses serve`.
+The repo has two first-class runtime modes:
 
-!!! warning
+1. `vllm-responses serve`
+1. `vllm serve --responses`
 
-    Starting the gateway via other mechanisms (e.g. calling `uvicorn`/`gunicorn` directly) is not intended.
+Direct startup via `uvicorn` or `gunicorn` remains useful for development and tests, but it is not the
+recommended product entrypoint.
 
 ## Operational Modes
 
-### 1. Spawning vLLM (Recommended)
+### 1. Remote-Upstream Gateway Mode
 
-The simplest way to get started. The gateway manages vLLM as a supervised subprocess, giving you a **one-command local runtime**. This is ideal for:
+Use `vllm-responses serve` when the upstream model server is already managed elsewhere. This is ideal for:
 
-- Local development and testing.
-- Quick prototyping and demos.
-- Single-instance deployments on a VM.
-- Ensuring the model and gateway share a lifecycle (both start/stop together).
+- External vLLM deployments.
+- Cloud-hosted OpenAI-compatible endpoints.
+- Restarting the gateway independently from the model server.
+- Multi-worker gateway deployments.
 
 ```bash
-vllm-responses serve -- \
-  meta-llama/Llama-3.2-3B-Instruct \
-  --port 8457
+vllm-responses serve --upstream http://127.0.0.1:8000/v1
 ```
 
-!!! note
+### 2. Integrated Colocated Mode
 
-    Everything after the `--` separator is passed directly to the `vllm serve` command.
+Use `vllm serve --responses` for the single-command local vLLM + gateway experience. This is ideal for:
 
-### 2. External Upstream (Advanced)
-
-In this mode, you manage the vLLM server process separately. This is ideal for:
-
-- **Production deployments** where vLLM runs in a separate container/pod.
-- You already have a vLLM deployment (e.g., Kubernetes, Ray Serve).
-- You want to restart the gateway without restarting the model (which takes time to load weights).
-- Connecting to a cloud-hosted inference endpoint.
+- Local development.
+- Demos and experimentation.
+- Operators who want vLLM and the gateway on one public API server.
 
 ```bash
-# 1. Start vLLM separately
-vllm serve meta-llama/Llama-3.2-3B-Instruct --port 8457
-
-# 2. Start the gateway pointing to it
---8<-- "snippets/serve_external_upstream_cmd.txt"
+vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 ```
 
 ______________________________________________________________________
 
 ## Configuration
 
-While CLI flags are the primary way to configure the gateway, you can also use environment variables.
+On the supported entrypoints, CLI flags own runtime topology and helper wiring.
+Environment variables remain available for deployment-scoped settings such as storage, metrics, tracing, auth, and cache.
 
-| CLI Flag            | Environment Variable               | Description                                 |
-| ------------------- | ---------------------------------- | ------------------------------------------- |
-| `--upstream`        | `VR_LLM_API_BASE`                  | Upstream vLLM URL                           |
-| `--gateway-host`    | `VR_HOST`                          | Bind host                                   |
-| `--gateway-port`    | `VR_PORT`                          | Bind port                                   |
-| `--gateway-workers` | `VR_WORKERS`                       | Number of workers                           |
-| (env only)          | `VR_MCP_CONFIG_PATH`               | Built-in MCP runtime config path            |
-| (env only)          | `VR_MCP_BUILTIN_RUNTIME_URL`       | Singleton Built-in MCP runtime loopback URL |
-| (env only)          | `VR_MCP_REQUEST_REMOTE_ENABLED`    | Enable/disable Remote MCP declarations      |
-| (env only)          | `VR_MCP_REQUEST_REMOTE_URL_CHECKS` | Enable/disable Remote MCP URL policy checks |
+For `vllm-responses serve`, the gateway-owned CLI surface is:
 
-When `VR_MCP_CONFIG_PATH` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
-If `VR_MCP_BUILTIN_RUNTIME_URL` is unset, `serve` uses `http://127.0.0.1:5981`.
-Set it only when you need a different loopback runtime address (for example, local port clashes) or when manually wiring workers to a separately managed runtime.
+| CLI Flag                             | Description                         |
+| ------------------------------------ | ----------------------------------- |
+| `--upstream`                         | Exact upstream API base URL         |
+| `--upstream-ready-timeout`           | Upstream readiness timeout          |
+| `--upstream-ready-interval`          | Upstream readiness polling interval |
+| `--gateway-host`                     | Bind host                           |
+| `--gateway-port`                     | Bind port                           |
+| `--gateway-workers`                  | Number of workers                   |
+| `--code-interpreter`                 | Code interpreter runtime policy     |
+| `--code-interpreter-port`            | Code interpreter port               |
+| `--code-interpreter-workers`         | Code interpreter worker count       |
+| `--code-interpreter-startup-timeout` | Code interpreter readiness timeout  |
+| `--mcp-config`                       | Built-in MCP runtime config path    |
+| `--mcp-port`                         | Built-in MCP runtime loopback port  |
 
-See [Configuration Reference](../reference/configuration.md) for a complete list.
+When `--mcp-config` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
+`--mcp-port` overrides the loopback runtime port.
+If `--mcp-port` is absent, `serve` uses `http://127.0.0.1:5981`.
+`--upstream-ready-timeout` and `--upstream-ready-interval` control how long the supervisor waits for the external upstream to become ready.
+
+For `vllm serve --responses`, bind/public port are owned by native vLLM flags such as `--host` and `--port`.
+Gateway-owned helper/runtime flags use the namespaced `--responses-*` family, for example:
+
+- `--responses-code-interpreter`
+- `--responses-code-interpreter-port`
+- `--responses-code-interpreter-workers`
+- `--responses-code-interpreter-startup-timeout`
+- `--responses-mcp-config`
+- `--responses-mcp-port`
+
+See [Configuration Reference](../reference/configuration.md) for env-only deployment settings.
 
 ______________________________________________________________________
 
@@ -80,11 +92,25 @@ The gateway exposes a health check endpoint useful for load balancers (AWS ALB, 
 - **Endpoint**: `GET /health`
 - **Response**: `200 OK` (JSON: `{}`)
 
+Base URL by mode:
+
+- `vllm-responses serve`: `http://127.0.0.1:5969/health` by default
+- `vllm serve --responses`: same host/port as `vllm serve` (default `http://127.0.0.1:8000/health`)
+
 ```bash
 curl http://127.0.0.1:5969/health
 ```
 
 The gateway also exposes a `/metrics` endpoint for Prometheus scraping. See [Observability](../deployment/observability.md) for monitoring setup instructions.
+
+## Compatibility Passthrough Endpoints
+
+When the gateway is configured with an upstream OpenAI-compatible base URL via `--upstream`, you can also call:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+This allows older Chat Completions clients to point to the gateway base URL directly while `POST /v1/responses` remains available.
 
 ## Graceful Shutdown
 
@@ -94,4 +120,3 @@ The gateway handles `SIGINT` (Ctrl+C) and `SIGTERM` gracefully:
 1. It waits for active requests to complete (within a timeout).
 1. It terminates the Code Interpreter subprocess (if spawned).
 1. It terminates the Built-in MCP runtime subprocess (if started).
-1. It terminates the vLLM subprocess (if spawned).

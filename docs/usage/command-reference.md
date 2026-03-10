@@ -5,20 +5,19 @@ Comprehensive reference for the `vllm-responses` CLI.
 ## Synopsis
 
 ```bash
-vllm-responses serve [OPTIONS] [-- vllm_args ...]
+vllm-responses serve [OPTIONS]
 ```
 
 ## Description
 
-The `vllm-responses serve` command acts as a supervisor. It can run in two primary modes:
+`vllm-responses serve` is the remote-upstream gateway supervisor.
 
-1. **External Upstream**: Connects to an existing, already-running vLLM server.
-1. **Spawn vLLM**: Starts and manages a vLLM process as a subprocess.
+It does not spawn vLLM. For the single-command colocated local stack, use `vllm serve --responses`.
 
 It also manages:
 
 1. the **Code Interpreter** runtime (unless disabled),
-1. the singleton **Built-in MCP** runtime process (when `VR_MCP_CONFIG_PATH` is set).
+1. the singleton **Built-in MCP** runtime process (when `--mcp-config` is set).
 
 ______________________________________________________________________
 
@@ -30,7 +29,15 @@ These options control where the gateway finds the inference server.
 
 #### `--upstream URL`
 
-**Description**: Base URL of an external OpenAI-compatible server. **Default**: `None` **Example**: `--upstream http://127.0.0.1:8457` **Notes**: If this is set, the gateway will **not** spawn vLLM. The `/v1` suffix is optional; the gateway normalizes it automatically.
+**Description**: Exact base URL of an external OpenAI-compatible server. **Default**: `None` **Example**: `--upstream http://127.0.0.1:8000/v1` **Notes**: Provide the exact API base URL you want the gateway to call.
+
+#### `--upstream-ready-timeout SECONDS`
+
+**Description**: Maximum time to wait for the upstream readiness check to succeed. **Default**: `1800` (30 minutes)
+
+#### `--upstream-ready-interval SECONDS`
+
+**Description**: Polling interval between upstream readiness checks. **Default**: `5`
 
 ### Gateway Configuration
 
@@ -38,27 +45,15 @@ These options control the `vllm-responses` server itself.
 
 #### `--gateway-host HOST`
 
-**Description**: The interface to bind the gateway server to. **Default**: `0.0.0.0` (See `VR_HOST`)
+**Description**: The interface to bind the gateway server to. **Default**: `0.0.0.0`
 
 #### `--gateway-port PORT`
 
-**Description**: The port to listen on. **Default**: `5969` (See `VR_PORT`)
+**Description**: The port to listen on. **Default**: `5969`
 
 #### `--gateway-workers N`
 
-**Description**: Number of Gunicorn workers to spawn. **Default**: `1` (See `VR_WORKERS`) **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
-
-### vLLM Spawning
-
-These options apply only when **not** using `--upstream`. Everything after `--` is forwarded to `vllm serve`.
-
-#### `--vllm-startup-timeout SECONDS`
-
-**Description**: Maximum time to wait for vLLM to become ready. **Default**: `1800` (30 minutes)
-
-#### `--vllm-ready-interval SECONDS`
-
-**Description**: How often to poll the vLLM health endpoint during startup. **Default**: `5`
+**Description**: Number of Gunicorn workers to spawn. **Default**: `1` **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
 
 ### Code Interpreter Configuration
 
@@ -98,27 +93,20 @@ ______________________________________________________________________
 `vllm-responses serve` resolves config in this order:
 
 1. CLI flags
-1. Environment variables (with `os.environ` taking precedence over `.env`)
 1. Built-in defaults
 
-For scalar values (ports, workers, timeouts), precedence is presence-based:
+Deployment-scoped environment variables such as storage, metrics, tracing, auth, and cache remain separate from this CLI surface.
 
-- If a CLI arg is provided, it wins even when the value is falsy (for example `0` or `0.0`).
-- Env/default fallback is only used when a CLI arg is absent.
+Built-in MCP runtime configuration is CLI-owned in this command:
 
-Built-in MCP runtime configuration is environment-only in this command:
-
-- Set `VR_MCP_CONFIG_PATH=/path/to/mcp.json` to enable Built-in MCP.
-- There is currently no dedicated `serve` CLI flag for MCP config path.
-- `VR_MCP_BUILTIN_RUNTIME_URL` is the single runtime-address knob (default `http://127.0.0.1:5981` when unset).
+- Use `--mcp-config /path/to/mcp.json` to enable Built-in MCP.
+- Use `--mcp-port PORT` to override the loopback port used by the Built-in MCP runtime.
 - When enabled, `serve` starts one loopback Built-in MCP runtime and injects `VR_MCP_BUILTIN_RUNTIME_URL` into gateway workers.
-- Set `VR_MCP_BUILTIN_RUNTIME_URL` only when you need a different loopback port/host in `serve`, or when manually wiring workers to a separately managed runtime.
+- If `--mcp-port` is absent, `serve` uses `http://127.0.0.1:5981`.
 
 Upstream selection precedence:
 
-1. `--upstream` (external upstream; `/v1` normalized). Error if used together with `--`.
-1. `-- <vllm args...>` (spawn vLLM; ignores `VR_LLM_API_BASE` with a notice).
-1. `VR_LLM_API_BASE` (external upstream from env / `.env`).
+1. `--upstream` (external upstream exact API base URL).
 1. Otherwise: configuration error ("no upstream configured").
 
 ## Examples
@@ -129,25 +117,16 @@ Upstream selection precedence:
 --8<-- "snippets/serve_external_upstream_cmd.txt"
 ```
 
-### Spawn vLLM (Simple)
+### Use the Colocated Single-Command Mode
 
 ```bash
-vllm-responses serve -- \
-  meta-llama/Llama-3.2-3B-Instruct
+vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 ```
 
-### Spawn vLLM (Custom Configuration)
-
-Spawn with 4 gateway workers, 4 vLLM GPUs, and a custom port.
+### Run the Remote-Upstream Gateway With More Workers
 
 ```bash
-vllm-responses serve --gateway-workers 4 -- \
-  meta-llama/Llama-3.2-3B-Instruct \
-  --tensor-parallel-size 4 \
-  --port 9000
+vllm-responses serve \
+  --gateway-workers 4 \
+  --upstream http://127.0.0.1:8000/v1
 ```
-
-Notes:
-
-- To change where the spawned vLLM process binds, pass `--host`/`--port` after `--` (they are forwarded to
-    `vllm serve`).

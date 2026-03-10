@@ -8,8 +8,10 @@ import httpx
 import pytest
 from fastapi import FastAPI, Response
 
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints import llm as mock_llm
-from vllm_responses.entrypoints.state import VRAppState, VRRequestState
+from vllm_responses.entrypoints._state import VRAppState, VRRequestState
 from vllm_responses.responses_core.store import DBResponseStore
 from vllm_responses.routers import serving
 from vllm_responses.types.api import UserAgent
@@ -69,7 +71,11 @@ def stub_code_interpreter_app() -> FastAPI:
 @pytest.fixture
 def gateway_app() -> FastAPI:
     app = FastAPI(title="VR Gateway (test)")
-    app.state.vllm_responses = VRAppState()
+    app.state.vllm_responses = VRAppState(
+        runtime_config=build_runtime_config_for_standalone(
+            env=EnvSource(environ={"VR_LLM_API_BASE": "http://mock/v1"})
+        )
+    )
     app.include_router(serving.router)
 
     @app.middleware("http")
@@ -111,10 +117,15 @@ async def patched_gateway_clients(
 
     from pydantic_ai.providers.openai import OpenAIProvider
 
-    def _provider_override():
+    def _provider_override(runtime_config, *args, **kwargs):
+        _ = runtime_config
+        _ = args
+        _ = kwargs
         return OpenAIProvider(api_key="test", base_url="http://mock/v1", http_client=llm_client)
 
     import vllm_responses.lm as lm
+    import vllm_responses.responses_core.store as store_mod
+    import vllm_responses.routers.serving as serving_mod
     import vllm_responses.tools.code_interpreter as code_interpreter
 
     store = DBResponseStore.from_db_url(
@@ -124,6 +135,8 @@ async def patched_gateway_clients(
     monkeypatch.setattr(lm, "get_openai_provider", _provider_override)
     monkeypatch.setattr(code_interpreter, "HTTP_ACLIENT", tool_client)
     monkeypatch.setattr(lm, "get_default_response_store", lambda: store)
+    monkeypatch.setattr(store_mod, "get_default_response_store", lambda: store)
+    monkeypatch.setattr(serving_mod, "get_default_response_store", lambda: store)
 
     try:
         yield

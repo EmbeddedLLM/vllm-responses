@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import sys
-import textwrap
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,20 +14,19 @@ from fastapi import FastAPI
 from openai import APIError as OpenAIAPIError
 from openai import AsyncOpenAI
 from pydantic import TypeAdapter
-from pydantic_ai import ModelHTTPError, UsageLimits
+from pydantic_ai import UsageLimits
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from sse_test_utils import extract_completed_response, parse_sse_frames, parse_sse_json_events
 
 from vllm_responses.entrypoints import llm as mock_llm
-from vllm_responses.entrypoints.state import VRAppState
+from vllm_responses.entrypoints._state import VRAppState
 from vllm_responses.mcp.config import (
     McpRuntimeConfig,
     load_mcp_runtime_config,
     split_hosted_server_entry,
 )
 from vllm_responses.mcp.gateway_toolset import McpGatewayToolset
-from vllm_responses.mcp.hosted_registry import HostedMCPRegistry
 from vllm_responses.mcp.runtime_client import (
     BuiltinMcpRuntimeTransportError,
     BuiltinMcpRuntimeUnavailableServerError,
@@ -620,480 +616,6 @@ def _make_runtime_config(servers: dict) -> McpRuntimeConfig:
             "mcp_server_entry": mcp_server_entry,
         }
     return McpRuntimeConfig.model_validate({"enabled": True, "mcp_servers": parsed_servers})
-
-
-def test_hosted_build_toolset_uses_shared_builder_and_passthrough_entry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import vllm_responses.mcp.hosted_registry as hosted_registry_module
-
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://mcp.example.com/mcp",
-                "headers": {"Authorization": "Bearer token"},
-                "transport": "sse",
-                "custom_passthrough": {"x": 1},
-            }
-        }
-    )
-
-    captured: dict[str, Any] = {}
-
-    def _fake_build_fastmcp_toolset_from_server_entry(
-        *,
-        server_label: str,
-        server_entry: Any,
-        timeout_s: float | None = None,
-        init_timeout_s: float | None = None,
-    ) -> AbstractToolset[Any]:
-        captured["server_label"] = server_label
-        captured["server_entry"] = server_entry
-        captured["timeout_s"] = timeout_s
-        captured["init_timeout_s"] = init_timeout_s
-        return _FakeRuntimeServer(tools=["search"])
-
-    monkeypatch.setattr(
-        hosted_registry_module,
-        "build_fastmcp_toolset_from_server_entry",
-        _fake_build_fastmcp_toolset_from_server_entry,
-    )
-
-    with _override_attr(hosted_registry_module.ENV_CONFIG, "mcp_hosted_tool_timeout_sec", 29):
-        with _override_attr(
-            hosted_registry_module.ENV_CONFIG, "mcp_hosted_startup_timeout_sec", 11
-        ):
-            toolset = HostedMCPRegistry._build_toolset(
-                server_label="docs", config=cfg.mcp_servers["docs"]
-            )
-    assert isinstance(toolset, _FakeRuntimeServer)
-    assert captured["server_label"] == "docs"
-    assert captured["server_entry"] == {
-        "url": "https://mcp.example.com/mcp",
-        "headers": {"Authorization": "Bearer token"},
-        "transport": "sse",
-        "custom_passthrough": {"x": 1},
-    }
-    assert captured["timeout_s"] == 29.0
-    assert captured["init_timeout_s"] == 11.0
-
-
-@pytest.mark.anyio
-async def test_optional_server_startup_failure_degrades(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = _make_runtime_config(
-        {
-            "optional_docs": {
-                "url": "https://optional-docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(
-                tools=["search"], startup_error=RuntimeError("startup boom")
-            )
-        ),
-    )
-
-    await manager.startup()
-    assert manager.is_server_available("optional_docs") is False
-    assert manager.get_server_startup_error("optional_docs") is not None
-
-
-@pytest.mark.anyio
-async def test_optional_server_startup_failure_redacts_inline_transport_and_auth_secrets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://mcp.example.com/mcp",
-                "headers": {
-                    "Authorization": "Bearer super-secret",
-                    "X-Api-Key": "api-secret",
-                },
-                "auth": "Bearer auth-secret",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(
-                tools=["search"],
-                startup_error=RuntimeError(
-                    "startup failed: Authorization Bearer super-secret and key api-secret and auth auth-secret"
-                ),
-            )
-        ),
-    )
-
-    await manager.startup()
-    startup_error = manager.get_server_startup_error("docs") or ""
-    assert "super-secret" not in startup_error
-    assert "api-secret" not in startup_error
-    assert "auth-secret" not in startup_error
-    assert "***" in startup_error
-
-
-@pytest.mark.anyio
-async def test_optional_server_startup_failure_redacts_stdio_env_secrets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-                "env": {
-                    "DOCS_TOKEN": "env-secret-token",
-                },
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(
-                tools=["search"],
-                startup_error=RuntimeError(
-                    "startup failed: env token env-secret-token should be redacted"
-                ),
-            )
-        ),
-    )
-
-    await manager.startup()
-    startup_error = manager.get_server_startup_error("docs") or ""
-    assert "env-secret-token" not in startup_error
-    assert "***" in startup_error
-
-
-@pytest.mark.anyio
-async def test_hosted_registry_starts_real_stdio_server_and_lists_tools(tmp_path: Path) -> None:
-    server_script = tmp_path / "stdio_test_server.py"
-    server_script.write_text(
-        textwrap.dedent(
-            """\
-            from fastmcp import FastMCP
-
-            mcp = FastMCP("test-stdio")
-
-            @mcp.tool()
-            def ping() -> str:
-                return "pong"
-
-            if __name__ == "__main__":
-                mcp.run(transport="stdio", show_banner=False)
-            """
-        ),
-        encoding="utf-8",
-    )
-
-    cfg = _make_runtime_config(
-        {
-            "stdio_demo": {
-                "command": sys.executable,
-                "args": [str(server_script)],
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    await manager.startup()
-    try:
-        assert manager.is_server_available("stdio_demo") is True
-        tools = await manager.list_tools("stdio_demo")
-        assert [tool.name for tool in tools] == ["ping"]
-    finally:
-        await manager.shutdown()
-
-
-@pytest.mark.anyio
-async def test_list_tools_returns_discovered_tools(monkeypatch: pytest.MonkeyPatch) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(lambda **kwargs: _FakeRuntimeServer(tools=["search", "get_page", "admin"])),
-    )
-
-    await manager.startup()
-    tools = await manager.list_tools("docs")
-    assert [tool.name for tool in tools] == ["admin", "get_page", "search"]
-
-
-@pytest.mark.anyio
-async def test_list_servers_reports_stdio_transport_for_command_entries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs_stdio": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-            },
-            "docs_http": {
-                "url": "https://docs.example.com/mcp",
-            },
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(lambda **kwargs: _FakeRuntimeServer(tools=["search"])),
-    )
-
-    await manager.startup()
-    servers = manager.list_servers()
-    transport_by_label = {server.server_label: server.transport for server in servers}
-    assert transport_by_label["docs_stdio"] == "stdio"
-    assert transport_by_label["docs_http"] == "auto"
-
-
-@pytest.mark.anyio
-async def test_registry_call_tool_success_returns_raw_output(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(tools=["search", "get_page"], call_result=42)
-        ),
-    )
-
-    await manager.startup()
-    out = await manager.call_tool_with_refresh(
-        server_label="docs", tool_name="search", arguments={"query": "q"}
-    )
-    assert out == 42
-
-
-@pytest.mark.anyio
-async def test_registry_call_tool_refreshes_once_then_reuses_refreshed_handle(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    remaining_key_errors = {"count": 1}
-
-    def _call_result(*, name: str, args: dict[str, object]) -> str:
-        _ = name, args
-        if remaining_key_errors["count"] > 0:
-            remaining_key_errors["count"] -= 1
-            raise KeyError("search")
-        return "ok"
-
-    server = _FakeRuntimeServer(tools=["search"], call_result=_call_result)
-    monkeypatch.setattr(HostedMCPRegistry, "_build_toolset", staticmethod(lambda **kwargs: server))
-
-    await manager.startup()
-    out1 = await manager.call_tool_with_refresh(
-        server_label="docs", tool_name="search", arguments={"q": 1}
-    )
-    out2 = await manager.call_tool_with_refresh(
-        server_label="docs", tool_name="search", arguments={"q": 2}
-    )
-
-    assert out1 == "ok"
-    assert out2 == "ok"
-    # Startup discovery + one refresh on initial KeyError; second request reuses refreshed cache.
-    assert server.get_tools_calls == 2
-    assert server.call_tool_calls == 3
-
-
-@pytest.mark.anyio
-async def test_registry_call_tool_second_keyerror_is_nonfatal_execution_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    server = _FakeRuntimeServer(tools=["search"], call_error=KeyError("search"))
-    monkeypatch.setattr(HostedMCPRegistry, "_build_toolset", staticmethod(lambda **kwargs: server))
-
-    await manager.startup()
-    with pytest.raises(KeyError):
-        await manager.call_tool_with_refresh(server_label="docs", tool_name="search", arguments={})
-    tools = await manager.list_tools("docs")
-    assert [tool.name for tool in tools] == ["search"]
-
-
-@pytest.mark.anyio
-async def test_registry_call_tool_nonmatching_keyerror_does_not_trigger_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    server = _FakeRuntimeServer(tools=["search"], call_error=KeyError("inner_runtime_key"))
-    monkeypatch.setattr(HostedMCPRegistry, "_build_toolset", staticmethod(lambda **kwargs: server))
-
-    await manager.startup()
-    with pytest.raises(KeyError, match="inner_runtime_key"):
-        await manager.call_tool_with_refresh(server_label="docs", tool_name="search", arguments={})
-    assert server.get_tools_calls == 1
-
-
-@pytest.mark.anyio
-async def test_startup_caches_allowed_mcp_tools_by_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    server = _FakeRuntimeServer(tools=["search", "get_page"])
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(lambda **kwargs: server),
-    )
-
-    await manager.startup()
-    tools = await manager.list_tools("docs")
-    assert [tool.name for tool in tools] == ["get_page", "search"]
-
-
-@pytest.mark.anyio
-async def test_shutdown_exits_active_hosted_toolsets(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    cfg = _make_runtime_config(
-        {
-            "docs": {
-                "url": "https://docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-    server = _FakeRuntimeServer(tools=["search"])
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(lambda **kwargs: server),
-    )
-
-    await manager.startup()
-    assert server.enter_calls == 1
-    assert server.exit_calls == 0
-
-    await manager.shutdown()
-    assert server.exit_calls == 1
-
-
-@pytest.mark.anyio
-async def test_optional_server_startup_timeout_surfaces_reason(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import vllm_responses.mcp.hosted_registry as hosted_registry_module
-
-    cfg = _make_runtime_config(
-        {
-            "slow_docs": {
-                "url": "https://slow-docs.example.com/mcp",
-            }
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(
-                tools=["search"], startup_error=asyncio.TimeoutError()
-            )
-        ),
-    )
-    with _override_attr(hosted_registry_module.ENV_CONFIG, "mcp_hosted_startup_timeout_sec", 3):
-        await manager.startup()
-        assert manager.is_server_available("slow_docs") is False
-        startup_error = manager.get_server_startup_error("slow_docs") or ""
-        assert "timed out" in startup_error.lower()
-        assert "3s" in startup_error
-
-
-@pytest.mark.anyio
-async def test_list_tools_rejects_unavailable_server(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from vllm_responses.utils.exceptions import BadInputError
-
-    cfg = _make_runtime_config(
-        {
-            "slow_docs": {
-                "url": "https://slow-docs.example.com/mcp",
-            },
-        }
-    )
-    manager = HostedMCPRegistry(config=cfg)
-
-    monkeypatch.setattr(
-        HostedMCPRegistry,
-        "_build_toolset",
-        staticmethod(
-            lambda **kwargs: _FakeRuntimeServer(
-                tools=["search"],
-                startup_error=RuntimeError("boom"),
-            )
-        ),
-    )
-
-    await manager.startup()
-    with pytest.raises(BadInputError, match="currently unavailable"):
-        await manager.list_tools("slow_docs")
 
 
 # ==============================
@@ -1749,34 +1271,6 @@ async def test_hosted_mcp_is_rejected_when_subsystem_disabled_even_with_tool_cho
 
 
 @pytest.mark.anyio
-async def test_request_remote_mcp_is_rejected_when_disabled(
-    patched_gateway_clients,
-    gateway_client: httpx.AsyncClient,
-) -> None:
-    import vllm_responses.types.openai as openai_types
-
-    with _override_attr(openai_types.ENV_CONFIG, "mcp_request_remote_enabled", False):
-        resp = await gateway_client.post(
-            "/v1/responses",
-            json={
-                "model": "some-model",
-                "stream": False,
-                "input": [{"role": "user", "content": "hello"}],
-                "tools": [
-                    {
-                        "type": "mcp",
-                        "server_label": "github_docs",
-                        "server_url": "https://mcp.example.com/sse",
-                    }
-                ],
-                "tool_choice": "none",
-            },
-        )
-
-    _assert_bad_input(resp, "disabled")
-
-
-@pytest.mark.anyio
 @pytest.mark.parametrize(
     "server_url",
     [
@@ -2086,7 +1580,9 @@ async def test_mixed_hosted_and_request_remote_declarations_are_supported() -> N
         builtin_mcp_runtime_client=_FakeRequestContractRegistry(
             enabled=True,
             servers={"hosted_docs": ["search_docs"]},
-        )
+        ),
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
     )
     assert run_settings["toolsets"] is not None
     assert any(isinstance(toolset, McpGatewayToolset) for toolset in run_settings["toolsets"])
@@ -2123,7 +1619,10 @@ async def test_request_remote_server_url_accepts_sse_and_streamable_http_shapes(
             "tool_choice": {"type": "mcp", "server_label": "github_docs", "name": "search_docs"},
         }
     )
-    _run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings()
+    _run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
+    )
     assert len(builtin_tools) == 0
     assert len(mcp_tool_name_map) == 1
     ref = next(iter(mcp_tool_name_map.values()))
@@ -2158,37 +1657,13 @@ async def test_request_remote_binding_does_not_require_transport_inference_metad
             "tool_choice": {"type": "mcp", "server_label": "github_docs", "name": "search_docs"},
         }
     )
-    await req.as_run_settings()
+    await req.as_run_settings(
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
+    )
     assert probe.seen_bindings
     assert probe.seen_bindings[0].server_url == server_url
     assert not hasattr(probe.seen_bindings[0], "transport")
-
-
-@pytest.mark.anyio
-async def test_request_remote_url_policy_checks_can_be_disabled(
-    patched_gateway_clients,
-    gateway_client: httpx.AsyncClient,
-) -> None:
-    import vllm_responses.types.openai as openai_types
-
-    with _override_attr(openai_types.ENV_CONFIG, "mcp_request_remote_url_checks", False):
-        resp = await gateway_client.post(
-            "/v1/responses",
-            json={
-                "model": "some-model",
-                "stream": False,
-                "input": [{"role": "user", "content": "hello"}],
-                "tools": [
-                    {
-                        "type": "mcp",
-                        "server_label": "github_docs",
-                        "server_url": "http://localhost/mcp",
-                    }
-                ],
-                "tool_choice": "none",
-            },
-        )
-    assert resp.status_code == 200
 
 
 @pytest.mark.anyio
@@ -2436,7 +1911,11 @@ async def test_hosted_mcp_toolset_validates_arguments_and_calls_router() -> None
         }
     )
 
-    run_settings, builtin_tools, _ = await req.as_run_settings(builtin_mcp_runtime_client=manager)
+    run_settings, builtin_tools, _ = await req.as_run_settings(
+        builtin_mcp_runtime_client=manager,
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
+    )
     assert len(builtin_tools) == 0
     assert run_settings["toolsets"] is not None
     mcp_toolset = next(
@@ -2534,7 +2013,9 @@ async def test_hosted_mcp_toolset_uses_mcp_description_and_normalizes_missing_ty
     )
 
     run_settings, builtin_tools, _ = await req.as_run_settings(
-        builtin_mcp_runtime_client=_FakeRegistry()
+        builtin_mcp_runtime_client=_FakeRegistry(),
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
     )
     assert len(builtin_tools) == 0
     assert run_settings["toolsets"] is not None
@@ -2629,7 +2110,9 @@ async def test_mcp_rehydration_keeps_colliding_tool_names_distinct() -> None:
     )
 
     run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
-        builtin_mcp_runtime_client=_FakeRegistry()
+        builtin_mcp_runtime_client=_FakeRegistry(),
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
     )
 
     assert len(builtin_tools) == 0
@@ -3042,7 +2525,9 @@ async def test_max_tool_calls_is_not_mapped_to_runtime_usage_limits() -> None:
         }
     )
     run_settings, _builtin_tools, _mcp_map = await req.as_run_settings(
-        builtin_mcp_runtime_client=None
+        builtin_mcp_runtime_client=None,
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
     )
     assert run_settings["usage_limits"].tool_calls_limit is None
     assert run_settings["usage_limits"].request_limit == UsageLimits().request_limit
@@ -3673,136 +3158,6 @@ async def test_gateway_non_stream_max_tool_calls_is_not_runtime_enforced(
     )
 
 
-@pytest.mark.anyio
-async def test_lm_stream_failure_logs_bounded_summary_without_transcript_dump(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import vllm_responses.lm as lm
-    import vllm_responses.lm_failures as lm_failures
-
-    @contextmanager
-    def _fake_capture_run_messages():
-        yield [
-            "secret-transcript: user said private thing",
-            "secret-tool-output: MCP returned sensitive payload",
-        ]
-
-    class _RaisingAgent:
-        output_type = object
-
-        async def run_stream_events(self, **kwargs):
-            if False:  # pragma: no cover - keep as async generator
-                yield None
-            raise ModelHTTPError(
-                status_code=502,
-                model_name="some-model",
-                body="<html>bad gateway</html>",
-            )
-
-    logged: list[tuple[str, str]] = []
-
-    def _capture(level: str):
-        def _log(message, *args, **kwargs):
-            rendered = str(message)
-            if args:
-                rendered = rendered.format(*args)
-            logged.append((level, rendered))
-
-        return _log
-
-    monkeypatch.setattr(lm, "capture_run_messages", _fake_capture_run_messages)
-    monkeypatch.setattr(lm.ENV_CONFIG, "log_model_messages", False)
-    monkeypatch.setattr(lm_failures.logger, "warning", _capture("warning"))
-    monkeypatch.setattr(lm_failures.logger, "error", _capture("error"))
-
-    req = vLLMResponsesRequest.model_validate(
-        {
-            "model": "some-model",
-            "stream": True,
-            "input": [{"role": "user", "content": "hello"}],
-        }
-    )
-    engine = lm.LMEngine(req)
-    engine._agent = _RaisingAgent()
-
-    events = [event async for event in engine._iter_responses_events_stream()]
-    event_types = [getattr(event, "type", None) for event in events]
-    assert "error" in event_types
-    assert "response.failed" in event_types
-
-    merged_logs = "\n".join(f"[{level}] {message}" for level, message in logged)
-    assert "LMEngine failure summary:" in merged_logs
-    assert "'failure_phase': 'stream'" in merged_logs
-    assert "'log_level': 'error'" in merged_logs
-    assert "'upstream_status_code': 502" in merged_logs
-    assert "secret-transcript:" not in merged_logs
-    assert "secret-tool-output:" not in merged_logs
-
-
-@pytest.mark.anyio
-async def test_lm_non_stream_failure_logs_bounded_summary_before_reraising(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import vllm_responses.lm as lm
-    import vllm_responses.lm_failures as lm_failures
-
-    @contextmanager
-    def _fake_capture_run_messages():
-        yield [
-            "secret-transcript: user said private thing",
-            "secret-tool-output: MCP returned sensitive payload",
-        ]
-
-    class _RaisingAgent:
-        output_type = object
-
-        async def run_stream_events(self, **kwargs):
-            if False:  # pragma: no cover - keep as async generator
-                yield None
-            raise ModelHTTPError(
-                status_code=404,
-                model_name="some-model",
-                body='{"error":{"message":"missing model","code":"model_not_found"}}',
-            )
-
-    logged: list[tuple[str, str]] = []
-
-    def _capture(level: str):
-        def _log(message, *args, **kwargs):
-            rendered = str(message)
-            if args:
-                rendered = rendered.format(*args)
-            logged.append((level, rendered))
-
-        return _log
-
-    monkeypatch.setattr(lm, "capture_run_messages", _fake_capture_run_messages)
-    monkeypatch.setattr(lm.ENV_CONFIG, "log_model_messages", False)
-    monkeypatch.setattr(lm_failures.logger, "warning", _capture("warning"))
-    monkeypatch.setattr(lm_failures.logger, "error", _capture("error"))
-
-    req = vLLMResponsesRequest.model_validate(
-        {
-            "model": "some-model",
-            "stream": False,
-            "input": [{"role": "user", "content": "hello"}],
-        }
-    )
-    engine = lm.LMEngine(req)
-    engine._agent = _RaisingAgent()
-
-    with pytest.raises(ModelHTTPError):
-        _ = [event async for event in engine._iter_responses_events_non_stream()]
-
-    merged_logs = "\n".join(f"[{level}] {message}" for level, message in logged)
-    assert "LMEngine failure summary:" in merged_logs
-    assert "'failure_phase': 'non_stream'" in merged_logs
-    assert "'log_level': 'warning'" in merged_logs
-    assert "'upstream_status_code': 404" in merged_logs
-    assert "secret-transcript:" not in merged_logs
-    assert "secret-tool-output:" not in merged_logs
-
-
 def test_lm_failure_summary_includes_last_failed_mcp_signature(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3853,6 +3208,7 @@ def test_lm_failure_summary_includes_last_failed_mcp_signature(
         messages=[],
         counters=counters,
         upstream_error_raw=None,
+        log_model_messages=False,
     )
 
     merged = "\n".join(logged)
@@ -3905,6 +3261,7 @@ def test_lm_failure_summary_tracks_request_remote_mode_counters(
         messages=[],
         counters=counters,
         upstream_error_raw=None,
+        log_model_messages=False,
     )
 
     merged = "\n".join(logged)

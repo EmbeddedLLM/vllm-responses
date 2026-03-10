@@ -4,9 +4,19 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
-from vllm_responses.tools.code_interpreter import run_code, start_server
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
+from vllm_responses.tools.code_interpreter import (
+    HTTP_ACLIENT,
+    bind_runtime_config,
+    configure_code_interpreter,
+    run_code,
+    start_server,
+)
+from vllm_responses.utils.exceptions import BadInputError
 
 pytestmark = pytest.mark.anyio
 
@@ -36,6 +46,17 @@ async def code_interpreter_server() -> None:
         )
 
     # Use multiple workers to cover the WorkerPool path (when supported by the runtime).
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_CODE_INTERPRETER_MODE": "spawn",
+                "VR_CODE_INTERPRETER_PORT": "5970",
+                "VR_CODE_INTERPRETER_WORKERS": "2",
+                "VR_PYODIDE_CACHE_DIR": str(cache_path),
+            }
+        )
+    )
+    configure_code_interpreter(runtime_config)
     process = await start_server(port=5970, workers=2)
     try:
         yield process
@@ -55,7 +76,13 @@ async def code_interpreter_server() -> None:
 
 
 async def test_code_interpreter_numpy(code_interpreter_server) -> None:
-    response = json.loads(await run_code("import numpy as np; np.array([1,2,3]).mean()"))
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "5970"}
+        )
+    )
+    with bind_runtime_config(runtime_config):
+        response = json.loads(await run_code("import numpy as np; np.array([1,2,3]).mean()"))
     assert response["status"] == "success"
     assert response["result"] == "2"
     assert response["stdout"] == ""
@@ -63,13 +90,25 @@ async def test_code_interpreter_numpy(code_interpreter_server) -> None:
 
 
 async def test_code_interpreter_ctypes_patch(code_interpreter_server) -> None:
-    response = json.loads(await run_code('import ctypes; ctypes.CDLL(None).system(b"whoami")'))
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "5970"}
+        )
+    )
+    with bind_runtime_config(runtime_config):
+        response = json.loads(await run_code('import ctypes; ctypes.CDLL(None).system(b"whoami")'))
     assert response["status"] == "exception"
     assert "'NoneType' object is not callable" in response["result"]
 
 
 async def test_code_interpreter_captures_print_stdout(code_interpreter_server) -> None:
-    response = json.loads(await run_code('print("P1"); print("P2"); 2+2'))
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "5970"}
+        )
+    )
+    with bind_runtime_config(runtime_config):
+        response = json.loads(await run_code('print("P1"); print("P2"); 2+2'))
     assert response["status"] == "success"
     assert response["stdout"] == "P1\nP2\n"
     assert response["stderr"] == ""
@@ -77,10 +116,112 @@ async def test_code_interpreter_captures_print_stdout(code_interpreter_server) -
 
 
 async def test_code_interpreter_base_eval_patch(code_interpreter_server) -> None:
-    response = json.loads(
-        await run_code(
-            'import _pyodide; _pyodide._base.eval_code("import os; os.system(\\"whoami\\")")'
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "5970"}
         )
     )
+    with bind_runtime_config(runtime_config):
+        response = json.loads(
+            await run_code(
+                'import _pyodide; _pyodide._base.eval_code("import os; os.system(\\"whoami\\")")'
+            )
+        )
     assert response["status"] == "success"
     assert 'import os; os.system("whoami")' in response["result"]
+
+
+async def test_run_code_reads_runtime_port_from_bound_config(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _fake_post(url: str, json: dict[str, str]):  # type: ignore[no-untyped-def]
+        captured["url"] = url
+        captured["json"] = json
+        return httpx.Response(200, text='{"status":"success"}')
+
+    monkeypatch.setattr(HTTP_ACLIENT, "post", _fake_post)
+    monkeypatch.setattr(HTTP_ACLIENT, "_transport", httpx.ASGITransport(app=None))
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "6112"}
+        )
+    )
+
+    with bind_runtime_config(runtime_config):
+        response = await run_code("print('ok')")
+
+    assert response == '{"status":"success"}'
+    assert captured["url"] == "http://localhost:6112/python"
+    assert captured["json"] == {"code": "print('ok')"}
+
+
+async def test_run_code_rejects_disabled_runtime_config() -> None:
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(environ={"VR_CODE_INTERPRETER_MODE": "disabled"})
+    )
+
+    with bind_runtime_config(runtime_config):
+        with pytest.raises(BadInputError, match="disabled by configuration"):
+            await run_code("print('blocked')")
+
+
+async def test_start_server_uses_runtime_config_startup_timeout(monkeypatch) -> None:
+    import vllm_responses.tools.code_interpreter as code_interpreter_mod
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.pid = 12345
+            self.returncode: int | None = None
+
+        def terminate(self) -> None:
+            self.returncode = 0
+
+        def kill(self) -> None:
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            return 0 if self.returncode is None else self.returncode
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (b"", b"")
+
+    process = _FakeProcess()
+    perf_values = iter([0.0, 0.0, 0.0, 0.06])
+
+    async def _fake_create_subprocess_exec(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return process
+
+    async def _fake_get(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise httpx.ConnectError("not ready")
+
+    async def _fake_sleep(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(
+        code_interpreter_mod,
+        "_get_spawn_command",
+        lambda **kwargs: (["code-interpreter-server", "--port", "6001"], "/tmp"),
+    )
+    monkeypatch.setattr(
+        code_interpreter_mod.asyncio,
+        "create_subprocess_exec",
+        _fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(code_interpreter_mod.HTTP_ACLIENT, "get", _fake_get)
+    monkeypatch.setattr(code_interpreter_mod.asyncio, "sleep", _fake_sleep)
+    monkeypatch.setattr(code_interpreter_mod, "perf_counter", lambda: next(perf_values))
+
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_CODE_INTERPRETER_MODE": "spawn",
+                "VR_CODE_INTERPRETER_PORT": "6001",
+                "VR_CODE_INTERPRETER_STARTUP_TIMEOUT": "0.05",
+                "VR_PYODIDE_CACHE_DIR": "/tmp/pyodide-cache",
+            }
+        )
+    )
+    configure_code_interpreter(runtime_config)
+
+    with pytest.raises(TimeoutError, match=r"0.05s"):
+        await start_server(port=6001, workers=0)

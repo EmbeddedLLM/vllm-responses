@@ -18,7 +18,6 @@ class Cache:
         cache_expiration: int = 5 * 60,  # 5 minutes
     ):
         self._redis_kwargs = dict(
-            # url=f"redis://[[username]:[password]]@{ENV_CONFIG.redis_host}:{ENV_CONFIG.redis_port}/1",
             url=redis_url,
             # https://redis.io/kb/doc/22wxq63j93/how-to-manage-client-reconnections-in-case-of-errors-with-redis-py
             retry=Retry(EqualJitterBackoff(cap=10, base=1), 5),

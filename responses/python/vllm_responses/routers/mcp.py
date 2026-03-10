@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 
+from vllm_responses.entrypoints._state import get_vr_app_state
 from vllm_responses.mcp.runtime_client import (
     BuiltinMcpRuntimeClient,
     BuiltinMcpRuntimeTransportError,
@@ -14,13 +15,12 @@ router = APIRouter()
 
 
 def _get_runtime_client(request: Request) -> BuiltinMcpRuntimeClient | None:
-    app_state = getattr(request.app.state, "vllm_responses", None)
+    app_state = get_vr_app_state(request.app)
     if app_state is None:
         return None
-    return getattr(app_state, "builtin_mcp_runtime_client", None)
+    return app_state.builtin_mcp_runtime_client
 
 
-@router.get("/v1/mcp/servers")
 async def list_mcp_servers(request: Request) -> ORJSONResponse:
     runtime_client = _get_runtime_client(request)
     if runtime_client is None or not runtime_client.is_enabled():
@@ -48,7 +48,6 @@ async def list_mcp_servers(request: Request) -> ORJSONResponse:
     return ORJSONResponse(status_code=200, content={"object": "list", "data": data})
 
 
-@router.get("/v1/mcp/servers/{server_label}/tools")
 async def list_mcp_server_tools(request: Request, server_label: str) -> ORJSONResponse:
     runtime_client = _get_runtime_client(request)
     if runtime_client is None or not runtime_client.is_enabled():
@@ -78,3 +77,20 @@ async def list_mcp_server_tools(request: Request, server_label: str) -> ORJSONRe
             ],
         },
     )
+
+
+def install_routes(router: APIRouter) -> None:
+    """Register MCP inspection routes on the provided router."""
+    router.add_api_route(
+        "/v1/mcp/servers",
+        list_mcp_servers,
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/v1/mcp/servers/{server_label}/tools",
+        list_mcp_server_tools,
+        methods=["GET"],
+    )
+
+
+install_routes(router)

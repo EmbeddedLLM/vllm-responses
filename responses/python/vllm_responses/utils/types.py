@@ -14,8 +14,6 @@ from pydantic.types import AwareDatetime
 from pydantic_extra_types.country import _index_by_alpha2 as iso_3166
 from pydantic_extra_types.language_code import _index_by_alpha2 as iso_639
 
-# from vllm_responses.configs import ENV_CONFIG
-
 # fmt: off
 FilePath = Union[str, Path]
 # Superficial JSON input/output types

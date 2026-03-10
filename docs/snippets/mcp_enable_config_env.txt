@@ -1,1 +1,0 @@
-export VR_MCP_CONFIG_PATH="/etc/vllm-responses/mcp.json"

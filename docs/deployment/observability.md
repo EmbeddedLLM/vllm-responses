@@ -17,7 +17,9 @@ The gateway exposes operational data through:
 The metrics endpoint is unauthenticated and available at:
 
 - **Endpoint**: `GET /metrics` (configurable via `VR_METRICS_PATH`)
-- **Port**: Same as gateway (default `5969`)
+- **Port**: Same as the active public API listener
+    - `vllm-responses serve`: default `5969`
+    - `vllm serve --responses`: default `8000` unless overridden by vLLM flags
 - **Format**: Prometheus text exposition format
 
 If you change `VR_METRICS_PATH`, update your Prometheus `metrics_path` accordingly.
@@ -186,6 +188,8 @@ Example:
 ```bash
 curl http://localhost:5969/health
 ```
+
+In integrated mode, use the `vllm serve` host/port instead (for example `http://localhost:8000/health` with defaults).
 
 Use this endpoint for:
 

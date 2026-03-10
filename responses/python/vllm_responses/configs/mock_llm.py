@@ -12,7 +12,7 @@ class MockLLMConfig(BaseSettings):
     """Configuration for the mock upstream LLM server (`vllm_responses.entrypoints.llm`).
 
     Notes:
-    - We intentionally keep this separate from `EnvConfig` because:
+    - We intentionally keep this separate from the gateway runtime-config builders because:
       - `VR_MOCK_LLM_SCENARIOS` can be large (avoid printing/logging it).
       - The gateway runtime does not need mock-LLM settings.
     - Env vars use the `VR_MOCK_LLM_` prefix to make scope unambiguous.

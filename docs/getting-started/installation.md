@@ -10,7 +10,7 @@ Get started with `vLLM Responses` by installing the package and its dependencies
     runtime (~400MB) and extract it; `tar` must be available.
 - **Bun** (Development): Required for source checkouts if you want the built-in Code Interpreter to work (enabled by
     default). Wheels for Linux x86_64 bundle a native Code Interpreter binary and do not require Bun.
-- **(Recommended) vLLM**: If you plan to spawn vLLM directly from the gateway, you'll need [`vllm`](https://docs.vllm.ai/en/latest/getting_started/installation/) installed.
+- **vLLM**: Required if you want the integrated colocated runtime via `vllm serve --responses`.
 
 ## Install the CLI
 

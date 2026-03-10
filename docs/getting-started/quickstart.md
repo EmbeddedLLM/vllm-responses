@@ -10,17 +10,15 @@ ______________________________________________________________________
 
 ## 1. Start the Gateway
 
-=== "Spawn vLLM"
+=== "Integrated Colocated Mode"
 
-    Let the gateway start vLLM for you (requires `vllm` installed):
+    Start vLLM and the Responses gateway together on one public API server:
 
     ```bash
-    vllm-responses serve --gateway-workers 1 -- \
-      meta-llama/Llama-3.2-3B-Instruct \
-      --port 8457
+    vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
     ```
 
-=== "External vLLM (Advanced)"
+=== "Remote-Upstream Gateway Mode"
 
     If you already have vLLM running on port 8457:
 
@@ -28,13 +26,20 @@ ______________________________________________________________________
     --8<-- "snippets/serve_external_upstream_cmd.txt"
     ```
 
-You should see output indicating the server is running at `http://127.0.0.1:5969`.
+Base URL by mode:
+
+- `vllm-responses serve`: `http://127.0.0.1:5969` by default
+- `vllm serve --responses`: same host/port as `vllm serve` (default `http://127.0.0.1:8000`)
 
 ______________________________________________________________________
 
 ## 2. Send a Request
 
 Now, send a request to the **Responses API** endpoint (`/v1/responses`).
+
+The cURL examples below use the default `vllm-responses serve` URL (`http://127.0.0.1:5969`).
+If you started integrated mode with `vllm serve --responses`, replace that base URL with your
+vLLM bind address (default `http://127.0.0.1:8000`).
 
 === "cURL (streaming with Code Interpreter)"
 
@@ -69,6 +74,12 @@ Now, send a request to the **Responses API** endpoint (`/v1/responses`).
 
     ```python
     --8<-- "snippets/openai_client_local_gateway.py"
+
+    # For integrated mode, export:
+    #   VLLM_RESPONSES_BASE_URL=http://127.0.0.1:8000/v1
+    #
+    # For `vllm-responses serve`, the default snippet base URL already matches:
+    #   http://127.0.0.1:5969/v1
 
     with client.responses.stream(
         model="meta-llama/Llama-3.2-3B-Instruct",
@@ -107,7 +118,10 @@ data: {"response":{...}}
 
 ## 4. Optional: MCP Smoke Test (Built-in MCP)
 
-If you enabled Built-in MCP (configured `VR_MCP_CONFIG_PATH` and a server label/tool), you can run a minimal forced tool call.
+If you enabled Built-in MCP on your active entrypoint, you can run a minimal forced tool call:
+
+- `vllm-responses serve ... --mcp-config /path/to/mcp.json`
+- `vllm serve ... --responses --responses-mcp-config /path/to/mcp.json`
 
 Need the Built-in MCP `mcp.json` format first? See:
 
@@ -125,6 +139,9 @@ curl -X POST http://127.0.0.1:5969/v1/responses \
     "tool_choice": {"type":"mcp","server_label":"github_docs","name":"search_docs"}
   }'
 ```
+
+If you are running integrated mode, replace `http://127.0.0.1:5969` with your `vllm serve`
+base URL (default `http://127.0.0.1:8000`).
 
 In the stream, you should see MCP lifecycle events such as:
 

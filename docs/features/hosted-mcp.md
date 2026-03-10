@@ -22,16 +22,20 @@ This page focuses on Built-in MCP setup and call flow, then summarizes Remote MC
 
 ## Prerequisites
 
-1. Configure MCP runtime servers via `VR_MCP_CONFIG_PATH`.
+1. Configure MCP runtime servers via `--mcp-config` (or `--responses-mcp-config` in integrated mode).
 1. Ensure the target `server_label` is available (`GET /v1/mcp/servers`).
-1. Start the gateway with `vllm-responses serve` so the singleton Built-in MCP runtime is launched.
+1. Start the gateway with either:
+    - `vllm-responses serve --mcp-config ...`, or
+    - `vllm serve --responses --responses-mcp-config ...`
 
 ## Built-in MCP Setup
 
-Set the Built-in MCP config path:
+Pass the Built-in MCP config path on the entrypoint CLI:
 
 ```bash
---8<-- "snippets/mcp_enable_config_env.txt"
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --mcp-config /etc/vllm-responses/mcp.json
 ```
 
 `mcp.json` follows the common MCP client-style shape: a top-level `mcpServers` object keyed by your server labels.
@@ -46,9 +50,13 @@ Verify server availability before requests:
 --8<-- "snippets/mcp_discover_servers_tools_curl.txt"
 ```
 
+For integrated mode, set `VLLM_RESPONSES_HTTP_BASE=http://127.0.0.1:8000` first (or use your
+custom `vllm serve` host/port).
+
 Runtime architecture note:
 
 - `vllm-responses serve` starts one internal Built-in MCP runtime process on loopback.
+- `vllm serve --responses --responses-mcp-config ...` also starts one loopback Built-in MCP helper for the combined app.
 - All gateway workers share that runtime, so Built-in MCP startup/discovery/session state is not duplicated per worker.
 
 ## Built-in MCP Usage
@@ -72,10 +80,16 @@ curl -X POST http://127.0.0.1:5969/v1/responses \
   }'
 ```
 
+If you are using integrated mode, replace `http://127.0.0.1:5969` with your `vllm serve`
+base URL (default `http://127.0.0.1:8000`).
+
 ### OpenAI Python SDK
 
 ```python
 --8<-- "snippets/openai_client_local_gateway.py"
+
+# For integrated mode, set:
+#   export VLLM_RESPONSES_BASE_URL=http://127.0.0.1:8000/v1
 
 with client.responses.stream(
     model="meta-llama/Llama-3.2-3B-Instruct",
@@ -108,7 +122,7 @@ See [Events Reference](../reference/events.md) for payload details.
 ## Remote MCP Mode Notes
 
 - Built-in MCP requests reference configured servers by `server_label` only.
-- Remote MCP via request `server_url` does not require server registration in `VR_MCP_CONFIG_PATH`.
+- Remote MCP via request `server_url` does not require server registration in the Built-in MCP config file.
 - Remote MCP transport selection is delegated to FastMCP from request `server_url` and headers.
 - `require_approval` currently supports `never` only.
 - Remote MCP host policy rejects `localhost`, `*.localhost`, and IP-literal hosts, and only `https` is accepted.

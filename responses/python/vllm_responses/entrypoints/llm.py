@@ -10,15 +10,18 @@ from fastapi.responses import ORJSONResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.builders import build_runtime_config_for_mock_llm
 from vllm_responses.configs.mock_llm import MockLLMConfig
-from vllm_responses.entrypoints.state import VRAppState
+from vllm_responses.configs.sources import EnvSource
+from vllm_responses.entrypoints._state import VRAppState
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.cassette_replay import (
     CassetteReplayer,
     CassetteReplayError,
     stream_sse_chunks,
 )
+
+RUNTIME_CONFIG = build_runtime_config_for_mock_llm(env=EnvSource.from_env())
 
 
 def _get_cassette_replayer(app: FastAPI) -> CassetteReplayer | None:
@@ -41,7 +44,7 @@ class ChatCompletionRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Using configuration: {ENV_CONFIG}")
+    logger.info(f"Using runtime config: {RUNTIME_CONFIG}")
     mock_cfg = MockLLMConfig()
     if mock_cfg.mode == "replay":
         scenarios_json = mock_cfg.scenarios_json
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Mock LLM (cassette replay)", lifespan=lifespan)
 app.state.vllm_responses = VRAppState()
+app.state.vllm_responses.runtime_config = RUNTIME_CONFIG
 
 
 def _json_dumps(obj: Any) -> str:

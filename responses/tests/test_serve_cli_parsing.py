@@ -1,39 +1,34 @@
 from __future__ import annotations
 
-from vllm_responses.entrypoints.serve import _build_root_parser, _normalize_remainder_args
+from vllm_responses.entrypoints.serve import _build_root_parser
 
 
-def test_normalize_remainder_args_strips_single_leading_delimiter() -> None:
-    assert _normalize_remainder_args([]) == []
-    assert _normalize_remainder_args(["model"]) == ["model"]
-    assert _normalize_remainder_args(["--", "model", "--port", "8456"]) == [
-        "model",
-        "--port",
-        "8456",
-    ]
-    # Only strip a leading delimiter, not internal tokens.
-    assert _normalize_remainder_args(["model", "--", "--port", "8456"]) == [
-        "model",
-        "--",
-        "--port",
-        "8456",
-    ]
-
-
-def test_argparse_remainder_includes_delimiter_token() -> None:
+def test_serve_parser_accepts_remote_upstream_flags() -> None:
     parser = _build_root_parser()
     ns = parser.parse_args(
         [
             "serve",
             "--gateway-port",
             "8458",
-            "--",
-            "QuantTrio/GLM-4.6-AWQ",
-            "--port",
-            "8456",
+            "--upstream",
+            "http://127.0.0.1:8000/v1",
+            "--code-interpreter-startup-timeout",
+            "12.5",
+            "--upstream-ready-timeout",
+            "90",
+            "--upstream-ready-interval",
+            "2.5",
+            "--mcp-config",
+            "/tmp/mcp.json",
+            "--mcp-port",
+            "6101",
         ]
     )
     assert ns.command == "serve"
-    # argparse includes the literal `--` in REMAINDER; we strip it later.
-    assert ns.vllm_args[0] == "--"
-    assert _normalize_remainder_args(list(ns.vllm_args))[0] == "QuantTrio/GLM-4.6-AWQ"
+    assert ns.gateway_port == 8458
+    assert ns.upstream == "http://127.0.0.1:8000/v1"
+    assert ns.code_interpreter_startup_timeout == "12.5"
+    assert ns.upstream_ready_timeout == "90"
+    assert ns.upstream_ready_interval == "2.5"
+    assert ns.mcp_config == "/tmp/mcp.json"
+    assert ns.mcp_port == "6101"

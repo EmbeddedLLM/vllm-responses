@@ -6,7 +6,6 @@ from typing import Any
 
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 
-from vllm_responses.configs import ENV_CONFIG
 from vllm_responses.mcp.config import McpRuntimeConfig, McpServerRuntimeConfig
 from vllm_responses.mcp.fastmcp_runtime import (
     build_fastmcp_toolset_from_server_entry,
@@ -40,8 +39,16 @@ class HostedMcpStaleToolError(KeyError):
 
 
 class HostedMCPRegistry:
-    def __init__(self, *, config: McpRuntimeConfig) -> None:
+    def __init__(
+        self,
+        *,
+        config: McpRuntimeConfig,
+        startup_timeout_s: float,
+        tool_timeout_s: float,
+    ) -> None:
         self._config = config
+        self._startup_timeout_s = float(startup_timeout_s)
+        self._tool_timeout_s = float(tool_timeout_s)
         self._states: dict[str, _ServerState] = {
             label: _ServerState(config=server_cfg)
             for label, server_cfg in config.mcp_servers.items()
@@ -61,14 +68,13 @@ class HostedMCPRegistry:
                 return
 
             for label, state in self._states.items():
-                startup_timeout_s = ENV_CONFIG.mcp_hosted_startup_timeout_sec
                 try:
                     toolset = self._build_toolset(server_label=label, config=state.config)
                     await toolset.__aenter__()
                     state.server = toolset
 
                     mcp_tools_by_name = await asyncio.wait_for(
-                        toolset.get_tools(ctx=None), timeout=startup_timeout_s
+                        toolset.get_tools(ctx=None), timeout=self._startup_timeout_s
                     )
                     tool_infos = extract_mcp_tool_infos(mcp_tools_by_name)
                     state.allowed_tools = dict(tool_infos)
@@ -89,7 +95,7 @@ class HostedMCPRegistry:
                         state=state,
                         server_label=label,
                         startup_error=truncate_error_text(
-                            f"MCP server startup timed out after {startup_timeout_s:g}s."
+                            f"MCP server startup timed out after {self._startup_timeout_s:g}s."
                         ),
                     )
                 except Exception as exc:
@@ -260,8 +266,8 @@ class HostedMCPRegistry:
             raise BadInputError(f"MCP server {server_label!r} is currently unavailable.")
         return state
 
-    @staticmethod
     def _build_toolset(
+        self,
         *,
         server_label: str,
         config: McpServerRuntimeConfig,
@@ -269,8 +275,8 @@ class HostedMCPRegistry:
         return build_fastmcp_toolset_from_server_entry(
             server_label=server_label,
             server_entry=config.mcp_server_entry.model_dump(exclude_none=True, round_trip=True),
-            timeout_s=ENV_CONFIG.mcp_hosted_tool_timeout_sec,
-            init_timeout_s=ENV_CONFIG.mcp_hosted_startup_timeout_sec,
+            timeout_s=self._tool_timeout_s,
+            init_timeout_s=self._startup_timeout_s,
         )
 
     @staticmethod

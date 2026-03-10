@@ -5,6 +5,11 @@ import os
 
 def child_exit(server, worker) -> None:  # type: ignore[no-untyped-def]
     """
+    This function is not imported by repo code directly.
+
+    Gunicorn loads this module via `--config .../gunicorn_conf.py` and discovers hook
+    functions like `child_exit` by name.
+
     Gunicorn hook to keep Prometheus multiprocess gauges correct.
 
     In multiprocess mode, Gauges configured with `multiprocess_mode="livesum"` require

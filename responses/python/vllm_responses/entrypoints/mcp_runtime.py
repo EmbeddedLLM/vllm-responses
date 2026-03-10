@@ -6,7 +6,8 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from vllm_responses.configs import ENV_CONFIG
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.mcp.config import load_mcp_runtime_config
 from vllm_responses.mcp.hosted_registry import (
     HostedMCPRegistry,
@@ -18,6 +19,8 @@ from vllm_responses.mcp.utils import canonicalize_output_text, redact_and_trunca
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.exceptions import BadInputError
 
+_RUNTIME_CONFIG = build_runtime_config_for_standalone(env=EnvSource.from_env())
+
 
 class _CallToolRequest(BaseModel):
     arguments: dict[str, object] = Field(default_factory=dict)
@@ -26,8 +29,12 @@ class _CallToolRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    mcp_runtime_config = load_mcp_runtime_config(ENV_CONFIG.mcp_config_path)
-    registry = HostedMCPRegistry(config=mcp_runtime_config)
+    mcp_runtime_config = load_mcp_runtime_config(_RUNTIME_CONFIG.mcp_config_path)
+    registry = HostedMCPRegistry(
+        config=mcp_runtime_config,
+        startup_timeout_s=_RUNTIME_CONFIG.mcp_hosted_startup_timeout_sec,
+        tool_timeout_s=_RUNTIME_CONFIG.mcp_hosted_tool_timeout_sec,
+    )
     await registry.startup()
     app.state.hosted_mcp_registry = registry
     yield
