@@ -16,6 +16,7 @@ ______________________________________________________________________
 
 - **Stateful Conversations**: Maintain conversation history automatically using `previous_response_id`, backed by a persistent store (SQLite/Postgres).
 - **Built-in Code Interpreter**: Let the model write and execute code in a sandboxed environment on the gateway.
+- **Built-in Web Search**: Let the model search the web, open pages, and search within page text through the gateway-owned `web_search` tool.
 - **MCP Integration (Built-in MCP + Remote MCP)**: Use configured Built-in MCP servers or Remote MCP declarations with Responses-style streaming events.
 - **Correct SSE Streaming**: Receive spec-compliant Server-Sent Events with precise ordering and shape guarantees.
 - **Drop-in Compatibility**: Works with any standard vLLM OpenAI-compatible endpoint.

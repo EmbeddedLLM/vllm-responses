@@ -263,6 +263,65 @@ def test_run_integrated_serve_cli_mcp_port_sets_runtime_url(
     ]
 
 
+def test_run_integrated_serve_web_search_profile_spawns_builtin_mcp_runtime_without_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+    popen_calls: list[dict[str, object]] = []
+
+    def _fake_upstream_main() -> None:
+        app = api_server_mod.build_app(SimpleNamespace(), ["generate"])
+        seen["mcp_url"] = app.state.vllm_responses.runtime_config.mcp_builtin_runtime_url
+        raise SystemExit(0)
+
+    api_server_mod = _install_fake_vllm(monkeypatch, upstream_main=_fake_upstream_main)
+
+    def _fake_popen(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        _ = args
+        proc = _FakeProc(poll_code=None)
+        popen_calls.append(
+            {
+                "cmd": [str(part) for part in cmd],
+                "env": kwargs.get("env"),
+            }
+        )
+        return proc
+
+    _patch_runtime_dependencies(
+        monkeypatch,
+        env=EnvSource(environ={}),
+        popen_factory=_fake_popen,
+    )
+
+    spec = IntegratedServeSpec(
+        vllm_args=["serve", "model", "--port", "8005"],
+        web_search_profile="duckduckgo_plus_fetch",
+        code_interpreter_mode="disabled",
+        code_interpreter_port=5970,
+        code_interpreter_workers=0,
+        code_interpreter_startup_timeout_s=30.0,
+        mcp_config_path=None,
+        mcp_port=None,
+    )
+
+    code = run_integrated_serve(spec)
+
+    assert code == 0
+    assert seen["mcp_url"] == "http://127.0.0.1:5981"
+    assert popen_calls[0]["cmd"][:8] == [
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "vllm_responses.entrypoints.mcp_runtime:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5981",
+    ]
+    assert popen_calls[0]["env"]["VR_WEB_SEARCH_PROFILE"] == "duckduckgo_plus_fetch"
+    assert "VR_MCP_CONFIG_PATH" not in popen_calls[0]["env"]
+
+
 def test_run_integrated_serve_validates_external_code_interpreter_readiness(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -299,6 +358,71 @@ def test_run_integrated_serve_validates_external_code_interpreter_readiness(
     assert ready_calls[0]["name"] == "code-interpreter"
     assert ready_calls[0]["url"] == "http://localhost:6123/health"
     assert ready_calls[0]["timeout_s"] == 45.0
+
+
+def test_run_integrated_serve_cleans_spawned_helpers_on_interrupt_during_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import vllm_responses.entrypoints._helper_runtime as helper_runtime_mod
+    import vllm_responses.entrypoints.vllm._runtime as runtime_mod
+
+    terminate_calls: list[str] = []
+
+    def _fake_upstream_main() -> None:
+        raise AssertionError("upstream main should not run")
+
+    _install_fake_vllm(monkeypatch, upstream_main=_fake_upstream_main)
+
+    def _fake_popen(cmd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        _ = args
+        _ = cmd
+        _ = kwargs
+        return _FakeProc(poll_code=None)
+
+    _patch_runtime_dependencies(
+        monkeypatch,
+        env=EnvSource(environ={}),
+        popen_factory=_fake_popen,
+    )
+    monkeypatch.setattr(
+        runtime_mod,
+        "build_code_interpreter_spawn_spec",
+        lambda runtime_config, *, error_factory, error_prefix: SpawnCodeInterpreterSpec(
+            cmd=["code-interpreter-server", "--port", "5970"],
+            cwd=Path("/tmp"),
+            port=5970,
+            workers=0,
+            ready_url="http://localhost:5970/health",
+        ),
+    )
+    monkeypatch.setattr(
+        helper_runtime_mod,
+        "terminate_process",
+        lambda proc, *, name, timeout_s=10.0: terminate_calls.append(name),
+    )
+    monkeypatch.setattr(
+        runtime_mod,
+        "terminate_process",
+        lambda proc, *, name, timeout_s=10.0: terminate_calls.append(name),
+    )
+    monkeypatch.setattr(
+        runtime_mod,
+        "wait_for_code_interpreter_ready",
+        lambda **kwargs: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    spec = IntegratedServeSpec(
+        vllm_args=["serve", "model"],
+        code_interpreter_mode="spawn",
+        code_interpreter_port=5970,
+        code_interpreter_workers=0,
+        code_interpreter_startup_timeout_s=30.0,
+    )
+
+    code = run_integrated_serve(spec)
+
+    assert code == 130
+    assert terminate_calls == ["code-interpreter"]
 
 
 def test_run_integrated_serve_rejects_mcp_port_without_config(

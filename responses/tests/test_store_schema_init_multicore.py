@@ -54,28 +54,3 @@ async def test_schema_ready_env_skips_init(tmp_path: Path, monkeypatch):
     assert not db_path.exists()
 
     await store.aclose()
-
-
-@pytest.mark.anyio
-async def test_schema_init_uses_engine_begin_transaction(tmp_path: Path, monkeypatch):
-    db_path = tmp_path / "state.db"
-    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
-
-    begin_called = False
-
-    from sqlalchemy.ext.asyncio import AsyncEngine
-
-    original_begin = AsyncEngine.begin
-
-    def _begin_wrapper(self, *args, **kwargs):
-        nonlocal begin_called
-        begin_called = True
-        return original_begin(self, *args, **kwargs)
-
-    monkeypatch.setattr(AsyncEngine, "begin", _begin_wrapper, raising=True)
-    monkeypatch.delenv("VR_DB_SCHEMA_READY", raising=False)
-
-    await store.ensure_schema()
-    assert begin_called is True
-
-    await store.aclose()

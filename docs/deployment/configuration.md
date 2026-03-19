@@ -201,10 +201,23 @@ vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 - vLLM API server
 - Gateway routes mounted into the same FastAPI app
 - Code interpreter helper runtime (optional)
+- `web_search` built-in tool support (optional, when `--responses-web-search-profile` is set)
 - Built-in MCP integration (optional, when `--responses-mcp-config` is set)
     - runs as a loopback helper runtime when enabled
+    - shipped `web_search` profiles can also cause this helper runtime to be started automatically
 
-Integrated mode example with Built-in MCP:
+Integrated mode example with `web_search`:
+
+```bash
+vllm serve meta-llama/Llama-3.2-3B-Instruct \
+  --responses \
+  --responses-web-search-profile exa_mcp
+```
+
+If the shipped `exa_mcp` profile should use an operator Exa key instead of the
+anonymous default, set `EXA_API_KEY` in the gateway environment before startup.
+
+Integrated mode example with explicit Built-in MCP config:
 
 ```bash
 vllm serve meta-llama/Llama-3.2-3B-Instruct \

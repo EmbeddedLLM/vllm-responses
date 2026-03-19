@@ -92,6 +92,7 @@ SSE metrics capture the end-to-end streaming duration for the `/v1/responses` en
 
 - `function` - Client-executed function tools (request count only)
 - `code_interpreter` - Gateway-executed code interpreter (request + execution/error metrics)
+- `web_search` - Gateway-executed web search tool calls (request + execution/error metrics)
 - `mcp` - MCP tool calls requested by the model (covers Built-in MCP and Remote MCP modes)
 
 Notes:
@@ -106,7 +107,7 @@ Labels are bounded to prevent cardinality explosion:
 - `method`: HTTP method (GET, POST, etc.)
 - `route`: Route template (e.g., `/v1/responses`), not raw paths
 - `status`: HTTP status code (200, 400, 500, etc.)
-- `tool_type`: Tool category (`function`, `code_interpreter`, `mcp`)
+- `tool_type`: Tool category (`function`, `code_interpreter`, `web_search`, `mcp`)
 - `server_label`: Built-in MCP server label configured in runtime config
 - `status` (MCP startup metric): `ok` or `error`
 

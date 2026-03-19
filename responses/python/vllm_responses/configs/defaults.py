@@ -8,6 +8,7 @@ from vllm_responses.configs.runtime import CodeInterpreterMode
 @dataclass(frozen=True, slots=True)
 class RuntimeDefaults:
     llm_api_base: str = "http://localhost:8080/v1"
+    web_search_profile: str | None = None
     host: str = "0.0.0.0"
     port: int = 5969
     workers: int = 1

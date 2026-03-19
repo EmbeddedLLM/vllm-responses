@@ -3,7 +3,6 @@ import os
 import shutil
 from asyncio.subprocess import Process
 from contextlib import contextmanager
-from contextvars import ContextVar, Token
 from pathlib import Path
 from time import perf_counter
 
@@ -13,17 +12,14 @@ from loguru import logger
 from vllm_responses.configs.runtime import RuntimeConfig
 from vllm_responses.observability.metrics import record_tool_executed
 from vllm_responses.tools import register
+from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL
+from vllm_responses.tools.runtime import ToolRuntimeContext, get_tool_runtime_context
 from vllm_responses.utils.exceptions import BadInputError
 from vllm_responses.utils.io import get_async_client
 
 HTTP_ACLIENT = get_async_client()
 
-CODE_INTERPRETER_TOOL = "code_interpreter"
 _PROCESS_RUNTIME_CONFIG: RuntimeConfig | None = None
-_REQUEST_RUNTIME_CONFIG: ContextVar[RuntimeConfig | None] = ContextVar(
-    "code_interpreter_runtime_config",
-    default=None,
-)
 
 
 def configure_code_interpreter(runtime_config: RuntimeConfig) -> None:
@@ -31,13 +27,22 @@ def configure_code_interpreter(runtime_config: RuntimeConfig) -> None:
     _PROCESS_RUNTIME_CONFIG = runtime_config
 
 
+def register_code_interpreter_tool() -> None:
+    register(CODE_INTERPRETER_TOOL)(run_code)
+
+
 @contextmanager
 def bind_runtime_config(runtime_config: RuntimeConfig):
-    token: Token[RuntimeConfig | None] = _REQUEST_RUNTIME_CONFIG.set(runtime_config)
-    try:
+    from vllm_responses.tools.runtime import bind_tool_runtime_context
+
+    existing_context = get_tool_runtime_context()
+    with bind_tool_runtime_context(
+        ToolRuntimeContext(
+            runtime_config=runtime_config,
+            web_search=None if existing_context is None else existing_context.web_search,
+        )
+    ):
         yield
-    finally:
-        _REQUEST_RUNTIME_CONFIG.reset(token)
 
 
 def _require_process_runtime_config() -> RuntimeConfig:
@@ -189,7 +194,6 @@ async def start_server(*, port: int | None = None, workers: int = 0) -> Process:
     )
 
 
-@register(CODE_INTERPRETER_TOOL)
 async def run_code(code: str) -> str:
     """
     Execute Python code in a sandboxed WebAssembly environment.
@@ -225,7 +229,10 @@ async def run_code(code: str) -> str:
         captured stdio and the final expression display (if any) are mapped into
         `code_interpreter_call.outputs` as `{"type":"logs","logs":"..."}` entries.
     """
-    runtime_config = _REQUEST_RUNTIME_CONFIG.get()
+    tool_runtime_context = get_tool_runtime_context()
+    runtime_config = (
+        tool_runtime_context.runtime_config if tool_runtime_context is not None else None
+    )
     if runtime_config is None:
         runtime_config = _PROCESS_RUNTIME_CONFIG
     if runtime_config is None:

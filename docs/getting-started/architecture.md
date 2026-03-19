@@ -4,7 +4,7 @@ Understand how `vLLM Responses` bridges the gap between the OpenAI Responses API
 
 ## Overview
 
-At its core, `vLLM Responses` is a translation layer (or "gateway"). It sits between your client application and your vLLM inference server, adding statefulness, built-in tool execution, MCP integration (Built-in MCP and Remote MCP), and spec-compliant streaming.
+At its core, `vLLM Responses` is a translation layer (or "gateway"). It sits between your client application and your vLLM inference server, adding statefulness, built-in tool execution (including Code Interpreter and `web_search`), MCP integration (Built-in MCP and Remote MCP), and spec-compliant streaming.
 
 ```mermaid
 sequenceDiagram
@@ -46,7 +46,7 @@ sequenceDiagram
 1. **Gateway** transforms the Responses request into a Chat Completions request and sends it to **vLLM** with the full conversation history.
 1. **vLLM** generates tokens and streams them back to the gateway as Chat Completions chunks.
 1. **Gateway** normalizes vLLM output into a stable internal event stream and composes spec-compliant Responses SSE events.
-1. If the model requests a **gateway-executed tool** (for example Code Interpreter or an MCP tool):
+1. If the model requests a **gateway-executed tool** (for example Code Interpreter, `web_search`, or an MCP tool):
     - The gateway executes the tool call (locally for built-ins, or via Built-in MCP / Remote MCP transport).
     - Results are fed back to vLLM to continue generation.
     - All of this happens within a single API request.
@@ -74,7 +74,9 @@ This significantly reduces bandwidth and complexity for client applications.
 
 ### Built-in Tools
 
-The gateway includes a runtime for **built-in tools**. The primary example is the **Code Interpreter**. When the model decides to write code, the gateway executes it in a secure, sandboxed environment and returns the results—all within a single API request lifecycle.
+The gateway includes runtimes for **built-in tools**. Current examples are the **Code Interpreter** and **`web_search`**. When the model decides to use one of these tools, the gateway executes it and returns the results within the same API request lifecycle.
+
+For `web_search`, the gateway resolves a startup-selected profile, executes search and page-opening actions behind the public `{"type": "web_search"}` tool shape, and keeps `find_in_page` page text in a request-local cache.
 
 ### MCP Integration
 

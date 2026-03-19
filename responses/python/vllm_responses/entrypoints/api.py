@@ -3,13 +3,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
-from gunicorn.app.base import BaseApplication
 from loguru import logger
 
 from vllm_responses.configs.builders import build_runtime_config_for_standalone
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints._state import require_vr_app_state
-from vllm_responses.entrypoints.gateway._app import augment_standalone_gateway_app
+from vllm_responses.entrypoints.gateway._app import (
+    activate_gateway_runtime,
+    augment_standalone_gateway_app,
+)
 from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.observability.tracing import configure_tracing
 from vllm_responses.responses_core.store import get_default_response_store
@@ -21,19 +23,18 @@ from vllm_responses.utils.logging import setup_logger_sinks, suppress_logging_ha
 # Setup logging
 setup_logger_sinks(None)
 suppress_logging_handlers(["uvicorn", "litellm", "pottery"], True)
-RUNTIME_CONFIG = build_runtime_config_for_standalone(env=EnvSource.from_env())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
-    logger.info(f"Using runtime config: {RUNTIME_CONFIG}")
-
-    tracing_shutdown = configure_tracing(RUNTIME_CONFIG, app)
     app_state = require_vr_app_state(app)
     runtime_config = app_state.runtime_config
     if runtime_config is None:
-        raise RuntimeError("vllm_responses runtime config is not initialized.")
+        runtime_config = build_runtime_config_for_standalone(env=EnvSource.from_env())
+    activate_gateway_runtime(app, runtime_config=runtime_config)
+    logger.info(f"Using runtime config: {runtime_config}")
+
+    tracing_shutdown = configure_tracing(runtime_config, app)
 
     # Ensure the ResponseStore schema exists.
     #
@@ -127,7 +128,6 @@ app = FastAPI(
 )
 augment_standalone_gateway_app(
     app,
-    runtime_config=RUNTIME_CONFIG,
     include_upstream_proxy=True,
     include_metrics_route=True,
     include_cors=True,
@@ -141,36 +141,8 @@ async def health() -> ORJSONResponse:
     return ORJSONResponse(status_code=200, content={})
 
 
-class StandaloneApplication(BaseApplication):
-    def __init__(self, app, options=None):
-        self.options = options or {}
-        self.application = app
-        super().__init__()
-
-    def load_config(self):
-        config = {
-            key: value
-            for key, value in self.options.items()
-            if key in self.cfg.settings and value is not None
-        }
-        for key, value in config.items():
-            self.cfg.set(key.lower(), value)
-
-    def load(self):
-        return self.application
-
-
 if __name__ == "__main__":
-    options = {
-        "bind": f"{RUNTIME_CONFIG.gateway_host}:{RUNTIME_CONFIG.gateway_port}",
-        "workers": RUNTIME_CONFIG.gateway_workers,
-        "worker_class": "uvicorn.workers.UvicornWorker",
-        "limit_concurrency": RUNTIME_CONFIG.gateway_max_concurrency,
-        "timeout": 600,
-        "graceful_timeout": 60,
-        "max_requests": 2000,
-        "max_requests_jitter": 200,
-        "keepalive": 60,  # AWS ALB and Nginx default to 60 seconds
-        "loglevel": "error",
-    }
-    StandaloneApplication(app, options).run()
+    raise SystemExit(
+        "Direct execution of vllm_responses.entrypoints.api is unsupported. "
+        "Use `vllm-responses serve` or `vllm serve --responses`."
+    )

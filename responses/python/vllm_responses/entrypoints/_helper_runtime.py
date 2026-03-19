@@ -17,6 +17,8 @@ from vllm_responses.entrypoints._serve_utils import (
     terminate_process,
     wait_http_ready,
 )
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import profiled_builtin_requires_mcp
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +167,10 @@ def build_mcp_runtime_spec(
     error_factory: Callable[..., Exception],
     error_prefix: str,
 ) -> McpRuntimeSpec | None:
-    if runtime_config.mcp_config_path is None:
+    if runtime_config.mcp_config_path is None and not profiled_builtin_requires_mcp(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id=runtime_config.web_search_profile,
+    ):
         return None
 
     runtime_url = runtime_config.mcp_builtin_runtime_url

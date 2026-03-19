@@ -154,6 +154,7 @@ In the stream, you should see MCP lifecycle events such as:
 Now that you have the basic loop working, try the advanced features:
 
 - **[Code Interpreter](../features/built-in-tools.md)**: Ask the model to write and execute code.
+- **[Web Search](../features/web-search.md)**: Let the model search the web with a shipped gateway profile.
 - **[Stateful Conversations](../features/statefulness.md)**: Use `previous_response_id` to continue a chat.
 - **[MCP Integration](../features/hosted-mcp.md)**: Use Built-in MCP or Remote MCP declarations.
 - **[Architecture](architecture.md)**: Learn how the gateway processes your request.

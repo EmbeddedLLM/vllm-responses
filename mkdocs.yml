@@ -47,6 +47,7 @@ nav:
   - Features:
       - Stateful Conversations: features/statefulness.md
       - Built-in Tools: features/built-in-tools.md
+      - Web Search: features/web-search.md
       - MCP Integration: features/hosted-mcp.md
   - Deployment:
       - Configuration Guide: deployment/configuration.md
@@ -57,6 +58,7 @@ nav:
       - Events: reference/events.md
   - Examples:
       - Code Interpreter: examples/code-interpreter-examples.md
+      - Web Search: examples/web-search-examples.md
       - Custom Tools: examples/tool-loop-examples.md
       - MCP Examples: examples/hosted-mcp-examples.md
       - Conversations: examples/stateful-conversations.md

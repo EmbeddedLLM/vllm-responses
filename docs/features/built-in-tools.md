@@ -1,6 +1,14 @@
 # Built-in Tools
 
-The gateway can execute certain tools on your behalf, streaming the results back to the client immediately. The primary built-in tool is the **Code Interpreter**.
+The gateway can execute certain built-in tools on your behalf and stream the
+results back through the Responses API.
+
+Current built-in tools:
+
+- **Code Interpreter**
+- **Web Search**
+
+For the dedicated `web_search` guide, see [Web Search](web-search.md).
 
 ## Code Interpreter
 

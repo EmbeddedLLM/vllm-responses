@@ -32,6 +32,13 @@ class EnvSource:
     def get_str(self, key: str, default: str) -> str:
         return self.get_typed(key, default, lambda value: value)
 
+    def get_optional_str(self, key: str, default: str | None = None) -> str | None:
+        value, is_set = self.get(key)
+        if not is_set or value is None:
+            return default
+        stripped = value.strip()
+        return stripped or None
+
     def get_int(self, key: str, default: int) -> int:
         return self.get_typed(key, default, int)
 

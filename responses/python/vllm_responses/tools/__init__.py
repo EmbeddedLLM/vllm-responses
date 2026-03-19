@@ -1,5 +1,7 @@
 from pydantic_ai import Tool
 
+from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL, WEB_SEARCH_TOOL
+
 TOOLS: dict[str, Tool] = {}
 
 
@@ -29,4 +31,9 @@ def register(name_or_func=None):
     return decorator
 
 
-from vllm_responses.tools.code_interpreter import CODE_INTERPRETER_TOOL  # noqa: F401
+__all__ = [
+    "CODE_INTERPRETER_TOOL",
+    "TOOLS",
+    "WEB_SEARCH_TOOL",
+    "register",
+]

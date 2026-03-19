@@ -87,6 +87,40 @@ Available extras:
 - `build`: Package build/publish tools.
 - `all`: Everything above.
 
+## Build a wheel from source
+
+If you want to produce a local wheel from this checkout, build from the
+`responses/` package directory.
+
+### Rebuild the bundled Code Interpreter binary (Linux x86_64 only)
+
+This step is only needed if you want the wheel to include a freshly compiled
+Code Interpreter binary.
+
+```bash
+bash scripts/ci/prebuild_code_interpreter_linux_x86_64.sh responses
+```
+
+The script writes the bundled executable under:
+
+- `responses/python/vllm_responses/tools/code_interpreter/bin/linux/x86_64/code-interpreter-server`
+
+### Build wheel and sdist
+
+```bash
+uv pip install -e './responses[build]'
+cd responses
+python -m build --wheel --sdist
+```
+
+Build artifacts are written to:
+
+- `responses/dist/`
+
+On Linux x86_64, wheels built after the prebuild step bundle the native Code
+Interpreter binary. On other platforms, use the source-install Bun fallback or
+disable Code Interpreter.
+
 ## Run
 
 ### remote-upstream gateway mode (`vllm-responses serve`)

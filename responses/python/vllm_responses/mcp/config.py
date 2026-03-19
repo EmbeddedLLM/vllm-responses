@@ -216,14 +216,7 @@ def _validate_http_entry(mcp_server_entry: dict[str, object]) -> HttpMcpServerEn
     return HttpMcpServerEntry.model_validate(mcp_server_entry)
 
 
-def load_mcp_runtime_config(path: str | None) -> McpRuntimeConfig:
-    if path is None or not path.strip():
-        return McpRuntimeConfig(enabled=False, mcp_servers={})
-
-    config_path = Path(path).expanduser().resolve()
-    with config_path.open("r", encoding="utf-8") as f:
-        raw = json.load(f)
-
+def load_mcp_runtime_config_from_obj(raw: object) -> McpRuntimeConfig:
     if not isinstance(raw, dict):
         raise ValueError("MCP config must be a JSON object.")
 
@@ -248,3 +241,23 @@ def load_mcp_runtime_config(path: str | None) -> McpRuntimeConfig:
         )
 
     return McpRuntimeConfig(enabled=True, mcp_servers=parsed_servers)
+
+
+def load_mcp_runtime_config(path: str | None) -> McpRuntimeConfig:
+    if path is None or not path.strip():
+        return McpRuntimeConfig(enabled=False, mcp_servers={})
+
+    config_path = Path(path).expanduser().resolve()
+    with config_path.open("r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    return load_mcp_runtime_config_from_obj(raw)
+
+
+def merge_mcp_runtime_configs(*configs: McpRuntimeConfig) -> McpRuntimeConfig:
+    merged_servers: dict[str, McpServerRuntimeConfig] = {}
+    for config in configs:
+        if not config.enabled:
+            continue
+        merged_servers.update(config.mcp_servers)
+    return McpRuntimeConfig(enabled=bool(merged_servers), mcp_servers=merged_servers)

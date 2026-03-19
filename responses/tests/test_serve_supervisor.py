@@ -36,17 +36,23 @@ class _FakeStore:
         return None
 
 
-def _base_spec(*, mcp_runtime: McpRuntimeSpec | None) -> ServeSpec:
+def _base_spec(
+    *,
+    mcp_runtime: McpRuntimeSpec | None,
+    web_search_profile: str | None = None,
+    mcp_config_path: str | None = None,
+) -> ServeSpec:
     runtime_config = build_runtime_config_for_supervisor(
         args=SimpleNamespace(
             upstream="http://127.0.0.1:8457/v1",
             gateway_host="127.0.0.1",
             gateway_port=5969,
             gateway_workers=1,
+            web_search_profile=web_search_profile,
             code_interpreter="disabled",
             code_interpreter_port=None,
             code_interpreter_workers=None,
-            mcp_config=None if mcp_runtime is None else "/tmp/mcp.json",
+            mcp_config=mcp_config_path if mcp_config_path is not None else None,
             mcp_port=None if mcp_runtime is None else mcp_runtime.port,
         ),
         env=EnvSource(environ={}),
@@ -132,7 +138,9 @@ def test_run_serve_spec_with_mcp_runtime_spawns_and_injects(
             host="127.0.0.1",
             port=5981,
             ready_url="http://127.0.0.1:5981/health",
-        )
+        ),
+        web_search_profile="exa_mcp",
+        mcp_config_path="/tmp/mcp.json",
     )
 
     code = run_serve_spec(spec)
@@ -148,5 +156,39 @@ def test_run_serve_spec_with_mcp_runtime_spawns_and_injects(
     assert len(gateway_calls) == 1
     gateway_env = gateway_calls[0]["env"]
     assert isinstance(gateway_env, dict)
+    assert gateway_env.get("VR_WEB_SEARCH_PROFILE") == "exa_mcp"
+    assert gateway_env.get("VR_MCP_CONFIG_PATH") == "/tmp/mcp.json"
     assert gateway_env.get("VR_MCP_BUILTIN_RUNTIME_URL") == "http://127.0.0.1:5981"
     assert "VR_RESPONSES_RUNTIME_MODE" not in gateway_env
+
+
+def test_run_serve_spec_with_web_search_profile_spawns_builtin_mcp_runtime_without_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    popen_calls = _patch_supervisor_runtime_dependencies(monkeypatch)
+    spec = _base_spec(
+        mcp_runtime=McpRuntimeSpec(
+            host="127.0.0.1",
+            port=5981,
+            ready_url="http://127.0.0.1:5981/health",
+        ),
+        web_search_profile="duckduckgo_plus_fetch",
+        mcp_config_path=None,
+    )
+
+    code = run_serve_spec(spec)
+
+    assert code == 0
+    assert len(popen_calls) == 2
+    mcp_runtime_calls = [call for call in popen_calls if call["is_mcp_runtime"] is True]
+    assert len(mcp_runtime_calls) == 1
+    assert "VR_MCP_CONFIG_PATH" not in mcp_runtime_calls[0]["env"]
+    assert mcp_runtime_calls[0]["env"]["VR_WEB_SEARCH_PROFILE"] == "duckduckgo_plus_fetch"
+
+    gateway_calls = [call for call in popen_calls if call["is_mcp_runtime"] is False]
+    assert len(gateway_calls) == 1
+    gateway_env = gateway_calls[0]["env"]
+    assert isinstance(gateway_env, dict)
+    assert gateway_env.get("VR_WEB_SEARCH_PROFILE") == "duckduckgo_plus_fetch"
+    assert "VR_MCP_CONFIG_PATH" not in gateway_env
+    assert gateway_env.get("VR_MCP_BUILTIN_RUNTIME_URL") == "http://127.0.0.1:5981"

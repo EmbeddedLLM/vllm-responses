@@ -27,6 +27,7 @@ class IntegratedServeSpec:
     code_interpreter_startup_timeout_s: float
     mcp_config_path: str | None = None
     mcp_port: int | None = None
+    web_search_profile: str | None = None
 
 
 def should_show_integrated_help(raw_args: list[str]) -> bool:
@@ -79,6 +80,7 @@ def build_integrated_serve_spec(raw_args: list[str]) -> IntegratedServeSpec:
 
     return IntegratedServeSpec(
         vllm_args=resolved_cli.filtered_args,
+        web_search_profile=resolved_cli.web_search_profile,
         code_interpreter_mode=resolved_cli.code_interpreter_mode,
         code_interpreter_port=resolved_cli.code_interpreter_port,
         code_interpreter_workers=resolved_cli.code_interpreter_workers,

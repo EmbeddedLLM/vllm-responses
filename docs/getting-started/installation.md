@@ -64,6 +64,36 @@ directory and extract it. Subsequent starts reuse the cache.
 - Default cache: `${XDG_CACHE_HOME:-$HOME/.cache}/vllm-responses/pyodide`
 - Override: set `VR_PYODIDE_CACHE_DIR` to a persistent directory with enough free disk space.
 
+## Build a wheel from a source checkout
+
+If you want to produce a local wheel from this repo, build from the
+`responses/` package directory.
+
+### Rebuild the bundled Code Interpreter binary (Linux x86_64 only)
+
+This step is only needed when you want the built wheel to include a freshly
+compiled native Code Interpreter binary.
+
+```bash
+bash scripts/ci/prebuild_code_interpreter_linux_x86_64.sh responses
+```
+
+### Build wheel and sdist
+
+```bash
+uv pip install -e './responses[build]'
+cd responses
+python -m build --wheel --sdist
+```
+
+Artifacts are written to:
+
+- `responses/dist/`
+
+On Linux x86_64, wheels built after the prebuild step bundle the native Code
+Interpreter binary. On other platforms, use the source-install Bun fallback or
+disable Code Interpreter.
+
 ## Optional dependency sets
 
 Some features require additional optional dependencies.

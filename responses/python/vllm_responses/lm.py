@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from pydantic_ai import (
@@ -32,8 +33,9 @@ from vllm_responses.responses_core.composer import ResponseComposer
 from vllm_responses.responses_core.normalizer import PydanticAINormalizer
 from vllm_responses.responses_core.sse import stream_responses_sse
 from vllm_responses.responses_core.store import ResponseStore, get_default_response_store
-from vllm_responses.tools import CODE_INTERPRETER_TOOL
-from vllm_responses.tools.code_interpreter import bind_runtime_config
+from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL
+from vllm_responses.tools.runtime import ToolRuntimeContext, bind_tool_runtime_context
+from vllm_responses.tools.web_search.runtime import build_web_search_tool_runtime
 from vllm_responses.types.openai import (
     AgentRunSettings,
     OpenAIResponsesError,
@@ -51,6 +53,17 @@ from vllm_responses.utils.io import get_async_client
 LM_CLIENT = get_async_client()
 INTEGRATED_LM_CLIENT = get_async_client()
 INTEGRATED_LM_CLIENT.headers[INTERNAL_UPSTREAM_HEADER_NAME] = "1"
+
+
+@dataclass(slots=True)
+class ResponseRunContext:
+    response: OpenAIResponsesResponse
+    hydrated_request: vLLMResponsesRequest
+    run_settings: AgentRunSettings
+    mcp_tool_name_map: dict[str, McpToolRef]
+    tool_runtime_context: ToolRuntimeContext
+    normalizer: PydanticAINormalizer
+    composer: ResponseComposer
 
 
 def get_openai_provider(
@@ -172,14 +185,7 @@ class LMEngine:
 
     async def _build_response_pipeline(
         self,
-    ) -> tuple[
-        OpenAIResponsesResponse,
-        vLLMResponsesRequest,
-        AgentRunSettings,
-        dict[str, McpToolRef],
-        PydanticAINormalizer,
-        ResponseComposer,
-    ]:
+    ) -> ResponseRunContext:
         # Seed the response from request fields, but do not allow `None` request values
         # to clobber schema-required response defaults (e.g. `tools: []`, `truncation: "disabled"`).
         response = OpenAIResponsesResponse.model_validate(self._body.model_dump(exclude_none=True))
@@ -192,6 +198,15 @@ class LMEngine:
             request_remote_url_checks_enabled=self._runtime_config.mcp_request_remote_url_checks,
         )
         builtin_tool_names = {t.name for t in builtin_tools}
+        tool_runtime_context = ToolRuntimeContext(
+            runtime_config=self._runtime_config,
+            web_search=build_web_search_tool_runtime(
+                request=hydrated_body,
+                enabled_builtin_tool_names=builtin_tool_names,
+                runtime_config=self._runtime_config,
+                builtin_mcp_runtime_client=self._builtin_mcp_runtime_client,
+            ),
+        )
 
         normalizer = PydanticAINormalizer(
             builtin_tool_names=builtin_tool_names,
@@ -200,7 +215,15 @@ class LMEngine:
         )
         include_set = set(hydrated_body.include or [])
         composer = ResponseComposer(response=response, include=include_set)
-        return response, hydrated_body, run_settings, mcp_tool_name_map, normalizer, composer
+        return ResponseRunContext(
+            response=response,
+            hydrated_request=hydrated_body,
+            run_settings=run_settings,
+            mcp_tool_name_map=mcp_tool_name_map,
+            tool_runtime_context=tool_runtime_context,
+            normalizer=normalizer,
+            composer=composer,
+        )
 
     async def _iter_responses_events_non_stream(
         self,
@@ -213,31 +236,31 @@ class LMEngine:
     ]:
         # Non-stream mode: exceptions should propagate so the HTTP layer can return a non-200 response.
         # (There is no SSE stream to carry error events.)
-        _, _, run_settings, _, normalizer, composer = await self._build_response_pipeline()
+        run_context = await self._build_response_pipeline()
         failure_counters = _FailureCounters()
 
         # Emit created/in_progress even if the upstream call fails immediately, to match the streaming contract.
-        for chunk in composer.start():
+        for chunk in run_context.composer.start():
             yield chunk
 
         with capture_run_messages() as messages:
             try:
-                with bind_runtime_config(self._runtime_config):
+                with bind_tool_runtime_context(run_context.tool_runtime_context):
                     async for event in self._agent.run_stream_events(
                         output_type=[self._agent.output_type, DeferredToolRequests],
-                        message_history=run_settings["message_history"],
-                        instructions=run_settings["instructions"],
-                        toolsets=run_settings["toolsets"],
-                        usage_limits=run_settings["usage_limits"],
+                        message_history=run_context.run_settings["message_history"],
+                        instructions=run_context.run_settings["instructions"],
+                        toolsets=run_context.run_settings["toolsets"],
+                        usage_limits=run_context.run_settings["usage_limits"],
                     ):
-                        for normalized in normalizer.on_event(event):
+                        for normalized in run_context.normalizer.on_event(event):
                             failure_counters.observe(normalized)
-                            for out in composer.feed(normalized):
+                            for out in run_context.composer.feed(normalized):
                                 yield out
             except (ModelHTTPError, UnexpectedModelBehavior) as e:
                 details = _extract_failure_details(e)
                 _log_failure_summary(
-                    response_id=composer.response.id,
+                    response_id=run_context.composer.response.id,
                     failure_phase="non_stream",
                     error_class=details.error_class,
                     log_level=_classify_failure_log_level(
@@ -263,31 +286,31 @@ class LMEngine:
         None,
     ]:
         # Stream mode: convert upstream failures into Responses stream error ordering.
-        response, _, run_settings, _, normalizer, composer = await self._build_response_pipeline()
+        run_context = await self._build_response_pipeline()
         failure_counters = _FailureCounters()
 
         # Emit created/in_progress even if the upstream call fails immediately, to match the streaming contract.
-        for chunk in composer.start():
+        for chunk in run_context.composer.start():
             yield chunk
 
         with capture_run_messages() as messages:
             try:
-                with bind_runtime_config(self._runtime_config):
+                with bind_tool_runtime_context(run_context.tool_runtime_context):
                     async for event in self._agent.run_stream_events(
                         output_type=[self._agent.output_type, DeferredToolRequests],
-                        message_history=run_settings["message_history"],
-                        instructions=run_settings["instructions"],
-                        toolsets=run_settings["toolsets"],
-                        usage_limits=run_settings["usage_limits"],
+                        message_history=run_context.run_settings["message_history"],
+                        instructions=run_context.run_settings["instructions"],
+                        toolsets=run_context.run_settings["toolsets"],
+                        usage_limits=run_context.run_settings["usage_limits"],
                     ):
-                        for normalized in normalizer.on_event(event):
+                        for normalized in run_context.normalizer.on_event(event):
                             failure_counters.observe(normalized)
-                            for out in composer.feed(normalized):
+                            for out in run_context.composer.feed(normalized):
                                 yield out
             except (ModelHTTPError, UnexpectedModelBehavior) as e:
                 details = _extract_failure_details(e)
                 _log_failure_summary(
-                    response_id=response.id,
+                    response_id=run_context.response.id,
                     failure_phase="stream",
                     error_class=details.error_class,
                     log_level=_classify_failure_log_level(
@@ -305,16 +328,16 @@ class LMEngine:
                     code=details.code,
                     message=details.message,
                     param=details.param,
-                    sequence_number=composer.alloc_sequence_number(),
+                    sequence_number=run_context.composer.alloc_sequence_number(),
                 )
-                response.error = OpenAIResponsesResponseError(
+                run_context.response.error = OpenAIResponsesResponseError(
                     code=details.code,
                     message=details.message,
                 )
-                response.status = "failed"
+                run_context.response.status = "failed"
                 yield OpenAIResponsesStream(
                     type="response.failed",
-                    response=response,
-                    sequence_number=composer.alloc_sequence_number(),
+                    response=run_context.response,
+                    sequence_number=run_context.composer.alloc_sequence_number(),
                 )
                 return

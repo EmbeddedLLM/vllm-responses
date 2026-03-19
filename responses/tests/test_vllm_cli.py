@@ -50,6 +50,36 @@ def test_vllm_cli_runs_integrated_serve_when_responses_flag_present(
     assert spec.code_interpreter_mode == "disabled"
 
 
+def test_vllm_cli_bootstraps_builtin_registries_before_integrated_spec_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import vllm_responses.tools as tools_mod
+
+    seen: dict[str, object] = {}
+
+    def _fake_run(spec) -> int:  # type: ignore[no-untyped-def]
+        seen["spec"] = spec
+        return 0
+
+    monkeypatch.setattr(tools_mod, "TOOLS", {})
+    monkeypatch.setattr(vllm_cli, "run_integrated_serve", _fake_run)
+
+    with pytest.raises(SystemExit) as excinfo:
+        vllm_cli.main(
+            [
+                "serve",
+                "model",
+                "--responses",
+                "--responses-web-search-profile",
+                "exa_mcp",
+                "--responses-code-interpreter=disabled",
+            ]
+        )
+
+    assert excinfo.value.code == 0
+    assert seen["spec"].web_search_profile == "exa_mcp"
+
+
 def test_vllm_cli_errors_for_responses_on_non_serve_commands(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

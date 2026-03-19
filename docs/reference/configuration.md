@@ -49,12 +49,13 @@ Notes:
 
 ## MCP Configuration (Built-in + Remote)
 
-| Variable                                | Description                                                                        | Default |
-| --------------------------------------- | ---------------------------------------------------------------------------------- | ------- |
-| **`VR_MCP_REQUEST_REMOTE_ENABLED`**     | Enable Remote MCP (`tools[].mcp.server_url`) handling.                             | `True`  |
-| **`VR_MCP_REQUEST_REMOTE_URL_CHECKS`**  | Enable Remote MCP URL policy checks (`https`, denylist hosts).                     | `True`  |
-| **`VR_MCP_HOSTED_STARTUP_TIMEOUT_SEC`** | Built-in MCP startup/discovery timeout in seconds (applies to all hosted servers). | `10`    |
-| **`VR_MCP_HOSTED_TOOL_TIMEOUT_SEC`**    | Built-in MCP call timeout in seconds (applies to all hosted servers).              | `60`    |
+| Variable                                | Description                                                                                     | Default |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------- | ------- |
+| **`VR_MCP_REQUEST_REMOTE_ENABLED`**     | Enable Remote MCP (`tools[].mcp.server_url`) handling.                                          | `True`  |
+| **`VR_MCP_REQUEST_REMOTE_URL_CHECKS`**  | Enable Remote MCP URL policy checks (`https`, denylist hosts).                                  | `True`  |
+| **`VR_MCP_HOSTED_STARTUP_TIMEOUT_SEC`** | Built-in MCP startup/discovery timeout in seconds (applies to all hosted servers).              | `10`    |
+| **`VR_MCP_HOSTED_TOOL_TIMEOUT_SEC`**    | Built-in MCP call timeout in seconds (applies to all hosted servers).                           | `60`    |
+| **`EXA_API_KEY`**                       | Optional Exa API key appended to the shipped `exa_mcp` helper URL when that profile is enabled. | (unset) |
 
 Built-in MCP enablement is CLI-owned on supported entrypoints:
 
@@ -76,6 +77,7 @@ For the canonical `mcp.json` examples (URL + stdio styles), see
 Notes:
 
 - Labels under `mcpServers` are request-visible `server_label` values.
+- `EXA_API_KEY` is not a `VR_`-prefixed gateway setting because it is passed through to the upstream Exa MCP helper contract directly.
 - Built-in MCP supports two server entry shapes:
     - URL-based HTTP: `url` (required, accepts `http://` or `https://`), `headers` (optional), `transport` (optional).
     - Command-style stdio: `command` (required), `args`/`env`/`cwd` (optional), `transport` optional but only `"stdio"`.

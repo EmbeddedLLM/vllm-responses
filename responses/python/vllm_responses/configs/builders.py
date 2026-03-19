@@ -7,13 +7,17 @@ from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
 from vllm_responses.configs.runtime import CodeInterpreterMode, RuntimeConfig, RuntimeMode
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.configs.startup import (
+    format_web_search_profile_choices,
     supervisor_responses_cli_labels,
     supervisor_responses_cli_raw_values,
     validate_responses_cli_args,
 )
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import (
+    profiled_builtin_requires_mcp,
+    validate_profiled_builtin_profile,
+)
 from vllm_responses.utils.urls import is_ready_url_host
-
-UNSET = object()
 
 
 class RuntimeConfigError(RuntimeError):
@@ -24,16 +28,6 @@ class RuntimeConfigError(RuntimeError):
 
 def loopback_url_from_port(port: int) -> str:
     return f"http://127.0.0.1:{int(port)}"
-
-
-def resolve_optional_string(
-    *, env: EnvSource, env_key: str, default: str | None = None
-) -> str | None:
-    raw, is_set = env.get(env_key)
-    if not is_set or raw is None:
-        return default
-    value = raw.strip()
-    return value or None
 
 
 def resolve_secret(*, env: EnvSource, env_key: str, default: str | None = None) -> str | None:
@@ -59,32 +53,42 @@ def build_common_runtime_config(
     gateway_port: int,
     gateway_workers: int,
     llm_api_base: str,
+    web_search_profile: str | None,
     code_interpreter_mode: CodeInterpreterMode,
     code_interpreter_port: int | None,
     code_interpreter_workers: int | None,
     code_interpreter_startup_timeout_s: float = RUNTIME_DEFAULTS.code_interpreter_startup_timeout_s,
     upstream_ready_timeout_s: float = RUNTIME_DEFAULTS.upstream_ready_timeout_s,
     upstream_ready_interval_s: float = RUNTIME_DEFAULTS.upstream_ready_interval_s,
-    mcp_config_path: str | None | object = UNSET,
-    mcp_builtin_runtime_url: str | None | object = UNSET,
+    mcp_config_path: str | None,
+    mcp_builtin_runtime_url: str | None,
 ) -> RuntimeConfig:
-    pyodide_cache_dir = resolve_optional_string(env=env, env_key="VR_PYODIDE_CACHE_DIR")
+    try:
+        validate_profiled_builtin_profile(
+            tool_type=WEB_SEARCH_TOOL,
+            profile_id=web_search_profile,
+        )
+    except ValueError as exc:
+        raise RuntimeConfigError(
+            "[runtime] error: "
+            f"unknown --web-search-profile={web_search_profile!r}; "
+            f"expected one of: {format_web_search_profile_choices()}."
+        ) from exc
+    pyodide_cache_dir = env.get_optional_str("VR_PYODIDE_CACHE_DIR")
     if pyodide_cache_dir is None:
-        xdg_cache_home = resolve_optional_string(env=env, env_key="XDG_CACHE_HOME")
+        xdg_cache_home = env.get_optional_str("XDG_CACHE_HOME")
         base_dir = Path(xdg_cache_home) if xdg_cache_home is not None else Path.home() / ".cache"
         pyodide_cache_dir = str(base_dir / "vllm-responses" / "pyodide")
 
-    resolved_mcp_config_path = (
-        resolve_optional_string(env=env, env_key="VR_MCP_CONFIG_PATH")
-        if mcp_config_path is UNSET
-        else mcp_config_path
+    resolved_mcp_config_path = mcp_config_path
+    resolved_mcp_builtin_runtime_url = mcp_builtin_runtime_url
+    requires_builtin_mcp = profiled_builtin_requires_mcp(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id=web_search_profile,
     )
-    resolved_mcp_builtin_runtime_url = (
-        resolve_optional_string(env=env, env_key="VR_MCP_BUILTIN_RUNTIME_URL")
-        if mcp_builtin_runtime_url is UNSET
-        else mcp_builtin_runtime_url
-    )
-    if resolved_mcp_config_path is not None and resolved_mcp_builtin_runtime_url is None:
+    if (
+        resolved_mcp_config_path is not None or requires_builtin_mcp
+    ) and resolved_mcp_builtin_runtime_url is None:
         resolved_mcp_builtin_runtime_url = RUNTIME_DEFAULTS.mcp_builtin_runtime_url
 
     return RuntimeConfig(
@@ -99,6 +103,7 @@ def build_common_runtime_config(
         log_dir=env.get_str("VR_LOG_DIR", RUNTIME_DEFAULTS.log_dir),
         llm_api_base=llm_api_base.strip(),
         openai_api_key=resolve_secret(env=env, env_key="VR_OPENAI_API_KEY"),
+        web_search_profile=web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=code_interpreter_port,
         code_interpreter_workers=code_interpreter_workers,
@@ -195,6 +200,9 @@ def build_runtime_config_for_standalone(
         gateway_port=env.get_int("VR_PORT", RUNTIME_DEFAULTS.port),
         gateway_workers=env.get_int("VR_WORKERS", RUNTIME_DEFAULTS.workers),
         llm_api_base=llm_api_base,
+        web_search_profile=env.get_optional_str(
+            "VR_WEB_SEARCH_PROFILE", RUNTIME_DEFAULTS.web_search_profile
+        ),
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=code_interpreter_port,
         code_interpreter_workers=code_interpreter_workers,
@@ -202,6 +210,8 @@ def build_runtime_config_for_standalone(
             "VR_CODE_INTERPRETER_STARTUP_TIMEOUT",
             RUNTIME_DEFAULTS.code_interpreter_startup_timeout_s,
         ),
+        mcp_config_path=env.get_optional_str("VR_MCP_CONFIG_PATH"),
+        mcp_builtin_runtime_url=env.get_optional_str("VR_MCP_BUILTIN_RUNTIME_URL"),
     )
 
 
@@ -249,7 +259,13 @@ def build_runtime_config_for_supervisor(
         )
 
     mcp_builtin_runtime_url = None
-    if responses_cli.mcp_config_path is not None and responses_cli.mcp_port is not None:
+    if responses_cli.mcp_port is not None and (
+        responses_cli.mcp_config_path is not None
+        or profiled_builtin_requires_mcp(
+            tool_type=WEB_SEARCH_TOOL,
+            profile_id=responses_cli.web_search_profile,
+        )
+    ):
         mcp_builtin_runtime_url = loopback_url_from_port(int(responses_cli.mcp_port))
 
     gateway_host_arg = args.gateway_host
@@ -269,6 +285,7 @@ def build_runtime_config_for_supervisor(
             RUNTIME_DEFAULTS.workers if gateway_workers_arg is None else int(gateway_workers_arg)
         ),
         llm_api_base=llm_api_base,
+        web_search_profile=responses_cli.web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=code_interpreter_port,
         code_interpreter_workers=code_interpreter_workers,
@@ -297,6 +314,7 @@ def build_runtime_config_for_integrated(
     env: EnvSource | None,
     host: str,
     port: int,
+    web_search_profile: str | None,
     code_interpreter_mode: CodeInterpreterMode,
     code_interpreter_port: int,
     code_interpreter_workers: int,
@@ -318,6 +336,7 @@ def build_runtime_config_for_integrated(
         gateway_port=port,
         gateway_workers=1,
         llm_api_base=f"http://{is_ready_url_host(host)}:{port}/v1",
+        web_search_profile=web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=effective_code_interpreter_port,
         code_interpreter_workers=effective_code_interpreter_workers,

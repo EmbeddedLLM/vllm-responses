@@ -43,6 +43,8 @@ from vllm_responses.entrypoints.vllm._adapter import (
 )
 from vllm_responses.entrypoints.vllm._spec import IntegratedServeSpec
 from vllm_responses.responses_core.store import configure_response_store
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import profiled_builtin_requires_mcp
 from vllm_responses.utils.logging import setup_logger_sinks
 from vllm_responses.utils.urls import is_ready_url_host
 
@@ -198,12 +200,16 @@ def _ensure_port_available(*, name: str, host: str, port: int, hint: str | None 
 def _start_integrated_helpers(
     *,
     spec: IntegratedServeSpec,
+    procs: list[HelperProcess],
     base_env: dict[str, str],
     runtime_config: RuntimeConfig,
     mcp_runtime: McpRuntimeSpec | None,
-) -> list[HelperProcess]:
-    procs: list[HelperProcess] = []
+) -> None:
     helper_env = dict(base_env)
+    if runtime_config.web_search_profile is not None:
+        helper_env["VR_WEB_SEARCH_PROFILE"] = runtime_config.web_search_profile
+    else:
+        helper_env.pop("VR_WEB_SEARCH_PROFILE", None)
     if runtime_config.mcp_config_path is not None:
         helper_env["VR_MCP_CONFIG_PATH"] = runtime_config.mcp_config_path
     else:
@@ -279,8 +285,6 @@ def _start_integrated_helpers(
             f"[integrated] mcp-runtime ready: url=http://{mcp_runtime.host}:{mcp_runtime.port}"
         )
 
-    return procs
-
 
 def _start_helper_watchdog(
     *,
@@ -332,9 +336,17 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
     original_build_app = api_server.build_app
 
     try:
-        if spec.mcp_port is not None and spec.mcp_config_path is None:
+        if (
+            spec.mcp_port is not None
+            and spec.mcp_config_path is None
+            and not profiled_builtin_requires_mcp(
+                tool_type=WEB_SEARCH_TOOL,
+                profile_id=spec.web_search_profile,
+            )
+        ):
             raise _IntegratedRuntimeError(
-                "[integrated] error: --responses-mcp-port requires --responses-mcp-config.",
+                "[integrated] error: --responses-mcp-port requires --responses-mcp-config "
+                "or a web_search profile that provisions Built-in MCP helpers.",
                 exit_code=2,
             )
         cli_mcp_runtime_url = (
@@ -344,6 +356,7 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
             env=env_source,
             host=host,
             port=port,
+            web_search_profile=spec.web_search_profile,
             code_interpreter_mode=spec.code_interpreter_mode,
             code_interpreter_port=spec.code_interpreter_port,
             code_interpreter_workers=spec.code_interpreter_workers,
@@ -360,8 +373,9 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
 
         configure_response_store(runtime_config)
         asyncio.run(get_default_response_store().ensure_schema())
-        helper_procs = _start_integrated_helpers(
+        _start_integrated_helpers(
             spec=spec,
+            procs=helper_procs,
             base_env=env_source.environ,
             runtime_config=runtime_config,
             mcp_runtime=mcp_runtime,

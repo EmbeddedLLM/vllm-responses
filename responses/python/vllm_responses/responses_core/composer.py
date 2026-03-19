@@ -26,6 +26,9 @@ from vllm_responses.responses_core.models import (
     ReasoningDone,
     ReasoningStarted,
     UsageFinal,
+    WebSearchCallCompleted,
+    WebSearchCallSearching,
+    WebSearchCallStarted,
 )
 from vllm_responses.types.openai import (
     OpenAICodeOutputLog,
@@ -45,6 +48,11 @@ from vllm_responses.types.openai import (
     OpenAIResponsesStreamPart,
     OpenAIResponsesStreamText,
     OpenAIResponsesUsage,
+    OpenAIWebSearchActionFindInPage,
+    OpenAIWebSearchActionOpenPage,
+    OpenAIWebSearchActionSearch,
+    OpenAIWebSearchSource,
+    OpenAIWebSearchToolCall,
     vLLMOutput,
 )
 from vllm_responses.utils import uuid7_str
@@ -70,6 +78,12 @@ class _ItemState:
     mcp_arguments_json: str = ""
     mcp_output: str | None = None
     mcp_error: str | None = None
+    web_search_action_type: str | None = None
+    web_search_query: str | None = None
+    web_search_queries: tuple[str, ...] = ()
+    web_search_sources: tuple[dict[str, str], ...] = ()
+    web_search_url: str | None = None
+    web_search_pattern: str | None = None
 
 
 class ResponseComposer:
@@ -93,6 +107,7 @@ class ResponseComposer:
         self._reasoning_state: _ItemState | None = None
         include_set = include or set()
         self._include_code_interpreter_outputs = "code_interpreter_call.outputs" in include_set
+        self._include_web_search_action_sources = "web_search_call.action.sources" in include_set
 
     @property
     def response(self) -> OpenAIResponsesResponse:
@@ -139,6 +154,12 @@ class ResponseComposer:
             yield from self._mcp_failed(event)
         elif isinstance(event, CodeInterpreterCallStarted):
             yield from self._start_code_interpreter_call(event)
+        elif isinstance(event, WebSearchCallStarted):
+            yield from self._start_web_search_call(event)
+        elif isinstance(event, WebSearchCallSearching):
+            yield from self._web_search_searching(event)
+        elif isinstance(event, WebSearchCallCompleted):
+            yield from self._web_search_completed(event)
         elif isinstance(event, CodeInterpreterCallCodeDelta):
             yield from self._code_delta(event)
         elif isinstance(event, CodeInterpreterCallCodeDone):
@@ -472,6 +493,85 @@ class ResponseComposer:
             id=state.item_id,
             status="completed",
             outputs=outputs,
+        )
+        yield OpenAIResponsesStreamOutput(
+            type="response.output_item.done",
+            sequence_number=self._incr_seq(),
+            output_index=state.output_index,
+            item=item,
+        )
+        self._output_items.append(item)
+
+    def _start_web_search_call(self, event: WebSearchCallStarted) -> Iterable:
+        item_id = uuid7_str("ws_")
+        out_index = self._alloc_output_index()
+        state = _ItemState(
+            item_id=item_id,
+            output_index=out_index,
+            kind="web_search_call",
+        )
+        self._items[event.item_key] = state
+
+        yield OpenAIResponsesStreamOutput(
+            type="response.output_item.added",
+            sequence_number=self._incr_seq(),
+            output_index=out_index,
+            item=OpenAIWebSearchToolCall(
+                id=item_id,
+                status="in_progress",
+            ),
+        )
+        yield OpenAIResponsesStreamText(
+            type="response.web_search_call.in_progress",
+            item_id=item_id,
+            sequence_number=self._incr_seq(),
+            output_index=out_index,
+        )
+
+    def _web_search_searching(self, event: WebSearchCallSearching) -> Iterable:
+        state = self._items[event.item_key]
+        yield OpenAIResponsesStreamText(
+            type="response.web_search_call.searching",
+            item_id=state.item_id,
+            sequence_number=self._incr_seq(),
+            output_index=state.output_index,
+        )
+
+    def _web_search_completed(self, event: WebSearchCallCompleted) -> Iterable:
+        state = self._items[event.item_key]
+        state.web_search_action_type = event.action_type
+        state.web_search_query = event.query
+        state.web_search_queries = event.queries
+        state.web_search_sources = event.sources
+        state.web_search_url = event.url
+        state.web_search_pattern = event.pattern
+        yield OpenAIResponsesStreamText(
+            type="response.web_search_call.completed",
+            item_id=state.item_id,
+            sequence_number=self._incr_seq(),
+            output_index=state.output_index,
+        )
+        if event.action_type == "search":
+            item_action = OpenAIWebSearchActionSearch(
+                query=event.query or "",
+                queries=list(event.queries) or None,
+                sources=(
+                    [OpenAIWebSearchSource.model_validate(source) for source in event.sources]
+                    if self._include_web_search_action_sources and event.sources
+                    else None
+                ),
+            )
+        elif event.action_type == "open_page":
+            item_action = OpenAIWebSearchActionOpenPage(url=event.url)
+        else:
+            item_action = OpenAIWebSearchActionFindInPage(
+                url=event.url,
+                pattern=event.pattern or "",
+            )
+        item = OpenAIWebSearchToolCall(
+            id=state.item_id,
+            status="completed",
+            action=item_action,
         )
         yield OpenAIResponsesStreamOutput(
             type="response.output_item.done",

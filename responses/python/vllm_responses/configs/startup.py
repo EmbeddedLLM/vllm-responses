@@ -9,8 +9,18 @@ from pydantic import BaseModel, ConfigDict, ValidationError, ValidationInfo, fie
 
 from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
 from vllm_responses.configs.runtime import CodeInterpreterMode
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import (
+    profiled_builtin_requires_mcp,
+    validate_profiled_builtin_profile,
+)
+from vllm_responses.tools.web_search.profiles import get_web_search_profile_ids
 
 _SUPPORTED_CODE_INTERPRETER_MODES = "{spawn,external,disabled}"
+
+
+def format_web_search_profile_choices() -> str:
+    return ", ".join(get_web_search_profile_ids())
 
 
 def find_flag_value(args: list[str], flag: str) -> str | None:
@@ -34,6 +44,17 @@ class ResponsesCliFlagSpec:
 
 
 RESPONSES_CLI_FLAG_SPECS = (
+    ResponsesCliFlagSpec(
+        field_name="web_search_profile",
+        supervisor_flag="--web-search-profile",
+        supervisor_dest="web_search_profile",
+        integrated_flag="--responses-web-search-profile",
+        metavar="PROFILE",
+        help=(
+            "Gateway-owned web search profile to enable. Choices: "
+            f"{format_web_search_profile_choices()}."
+        ),
+    ),
     ResponsesCliFlagSpec(
         field_name="code_interpreter_mode",
         supervisor_flag="--code-interpreter",
@@ -96,7 +117,7 @@ RESPONSES_CLI_FLAG_SPECS = (
         supervisor_dest="mcp_port",
         integrated_flag="--responses-mcp-port",
         metavar="PORT",
-        help="Loopback port for the Built-in MCP runtime (requires config).",
+        help="Loopback port for the Built-in MCP runtime.",
     ),
 )
 
@@ -104,6 +125,7 @@ RESPONSES_CLI_FLAG_SPECS = (
 class ResponsesCliArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    web_search_profile: str | None = None
     code_interpreter_mode: CodeInterpreterMode | None = None
     code_interpreter_port: int | None = None
     code_interpreter_workers: int | None = None
@@ -149,12 +171,41 @@ class ResponsesCliArgs(BaseModel):
             return stripped or None
         return value
 
+    @field_validator("web_search_profile", mode="before")
+    @classmethod
+    def _normalize_web_search_profile(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("web_search_profile")
+    @classmethod
+    def _validate_web_search_profile(cls, value: str | None) -> str | None:
+        try:
+            validate_profiled_builtin_profile(
+                tool_type=WEB_SEARCH_TOOL,
+                profile_id=value,
+            )
+        except ValueError as exc:
+            raise ValueError("unknown_profile") from exc
+        return value
+
     @field_validator("mcp_port")
     @classmethod
     def _validate_mcp_port_requires_config(
         cls, value: int | None, info: ValidationInfo
     ) -> int | None:
-        if value is not None and info.data.get("mcp_config_path") is None:
+        if (
+            value is not None
+            and info.data.get("mcp_config_path") is None
+            and not profiled_builtin_requires_mcp(
+                tool_type=WEB_SEARCH_TOOL,
+                profile_id=info.data.get("web_search_profile"),
+            )
+        ):
             raise ValueError("requires_mcp_config")
         return value
 
@@ -162,6 +213,7 @@ class ResponsesCliArgs(BaseModel):
 @dataclass(frozen=True, slots=True)
 class ResolvedIntegratedResponsesCli:
     filtered_args: list[str]
+    web_search_profile: str | None
     code_interpreter_mode: CodeInterpreterMode
     code_interpreter_port: int
     code_interpreter_workers: int
@@ -189,6 +241,7 @@ def format_integrated_responses_help_block() -> str:
         if spec.integrated_flag is None:
             continue
         lines.append(f"  {spec.integrated_flag} {spec.metavar}".rstrip())
+        lines.append(f"      {spec.help}")
     return "\n".join(lines)
 
 
@@ -263,6 +316,7 @@ def resolve_integrated_responses_cli(
         raise error_factory(f"{error_prefix} error: {exc}.") from None
 
     raw_values = {
+        "web_search_profile": integrated_raw_values["web_search_profile"],
         "code_interpreter_mode": (
             integrated_raw_values["code_interpreter_mode"]
             if integrated_raw_values["code_interpreter_mode"] is not None
@@ -306,6 +360,7 @@ def resolve_integrated_responses_cli(
         raise AssertionError("integrated code interpreter timeout must be resolved")
     return ResolvedIntegratedResponsesCli(
         filtered_args=filtered_args,
+        web_search_profile=responses_cli.web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=int(code_interpreter_port),
         code_interpreter_workers=int(code_interpreter_workers),
@@ -337,7 +392,18 @@ def _format_responses_cli_error(
     ):
         return (
             f"{error_prefix} error: {label} requires "
-            f"{labels.get('mcp_config_path', 'mcp_config_path')}."
+            f"{labels.get('mcp_config_path', 'mcp_config_path')} or a web_search profile "
+            "that provisions Built-in MCP helpers."
+        )
+
+    if (
+        field_name == "web_search_profile"
+        and error["type"] == "value_error"
+        and "unknown_profile" in error["msg"]
+    ):
+        return (
+            f"{error_prefix} error: unknown {label}={raw_value!r}; "
+            f"expected one of: {format_web_search_profile_choices()}."
         )
 
     return f"{error_prefix} error: invalid {label}={raw_value!r}."

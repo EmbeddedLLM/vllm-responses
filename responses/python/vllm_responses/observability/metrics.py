@@ -71,7 +71,7 @@ TOOL_DURATION_BUCKETS = (
     120,
 )
 
-ToolType = Literal["function", "code_interpreter", "mcp"]
+ToolType = Literal["function", "code_interpreter", "mcp", "web_search"]
 
 
 @dataclass(frozen=True)

@@ -55,6 +55,21 @@ These options control the `vllm-responses` server itself.
 
 **Description**: Number of Gunicorn workers to spawn. **Default**: `1` **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
 
+### Web Search Configuration
+
+#### `--web-search-profile PROFILE`
+
+**Description**: Enable the gateway-owned `web_search` built-in using the selected profile. **Default**: disabled **Example**: `--web-search-profile exa_mcp`
+
+**Notes**:
+
+- This is a gateway-owned feature-selection flag.
+- For `vllm-responses serve`, web search enablement is CLI-owned.
+- If the flag is omitted, `web_search` is disabled.
+- Shipped MCP-backed profiles provision their helper runtime entries automatically.
+- For the shipped `exa_mcp` profile, setting `EXA_API_KEY` in the gateway environment appends the operator key to the default Exa MCP URL automatically.
+- `--mcp-config` remains optional for generic MCP inventory and explicit helper overrides; it is not required just to make shipped `web_search` profiles work.
+
 ### Code Interpreter Configuration
 
 #### `--code-interpreter MODE`
@@ -97,6 +112,8 @@ ______________________________________________________________________
 
 Deployment-scoped environment variables such as storage, metrics, tracing, auth, and cache remain separate from this CLI surface.
 
+Gateway-owned feature-selection flags on this command, including `--web-search-profile`, do not use environment-variable fallback.
+
 Built-in MCP runtime configuration is CLI-owned in this command:
 
 - Use `--mcp-config /path/to/mcp.json` to enable Built-in MCP.
@@ -129,4 +146,12 @@ vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 vllm-responses serve \
   --gateway-workers 4 \
   --upstream http://127.0.0.1:8000/v1
+```
+
+### Enable Web Search
+
+```bash
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --web-search-profile exa_mcp
 ```

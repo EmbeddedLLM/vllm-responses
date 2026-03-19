@@ -51,25 +51,29 @@ Environment variables remain available for deployment-scoped settings such as st
 
 For `vllm-responses serve`, the gateway-owned CLI surface is:
 
-| CLI Flag                             | Description                         |
-| ------------------------------------ | ----------------------------------- |
-| `--upstream`                         | Exact upstream API base URL         |
-| `--upstream-ready-timeout`           | Upstream readiness timeout          |
-| `--upstream-ready-interval`          | Upstream readiness polling interval |
-| `--gateway-host`                     | Bind host                           |
-| `--gateway-port`                     | Bind port                           |
-| `--gateway-workers`                  | Number of workers                   |
-| `--code-interpreter`                 | Code interpreter runtime policy     |
-| `--code-interpreter-port`            | Code interpreter port               |
-| `--code-interpreter-workers`         | Code interpreter worker count       |
-| `--code-interpreter-startup-timeout` | Code interpreter readiness timeout  |
-| `--mcp-config`                       | Built-in MCP runtime config path    |
-| `--mcp-port`                         | Built-in MCP runtime loopback port  |
+| CLI Flag                             | Description                           |
+| ------------------------------------ | ------------------------------------- |
+| `--upstream`                         | Exact upstream API base URL           |
+| `--upstream-ready-timeout`           | Upstream readiness timeout            |
+| `--upstream-ready-interval`          | Upstream readiness polling interval   |
+| `--gateway-host`                     | Bind host                             |
+| `--gateway-port`                     | Bind port                             |
+| `--gateway-workers`                  | Number of workers                     |
+| `--web-search-profile`               | Enable a shipped `web_search` profile |
+| `--code-interpreter`                 | Code interpreter runtime policy       |
+| `--code-interpreter-port`            | Code interpreter port                 |
+| `--code-interpreter-workers`         | Code interpreter worker count         |
+| `--code-interpreter-startup-timeout` | Code interpreter readiness timeout    |
+| `--mcp-config`                       | Built-in MCP runtime config path      |
+| `--mcp-port`                         | Built-in MCP runtime loopback port    |
 
 When `--mcp-config` is set, `vllm-responses serve` starts a singleton Built-in MCP runtime process shared by all gateway workers.
 `--mcp-port` overrides the loopback runtime port.
 If `--mcp-port` is absent, `serve` uses `http://127.0.0.1:5981`.
 `--upstream-ready-timeout` and `--upstream-ready-interval` control how long the supervisor waits for the external upstream to become ready.
+Shipped `web_search` profiles that require Built-in MCP helper servers provision their default helper entries automatically, so `--mcp-config` is not required just to enable a shipped profile.
+For the shipped `exa_mcp` profile, setting `EXA_API_KEY` in the gateway
+environment appends the operator key to the default Exa MCP URL automatically.
 
 For `vllm serve --responses`, bind/public port are owned by native vLLM flags such as `--host` and `--port`.
 Gateway-owned helper/runtime flags use the namespaced `--responses-*` family, for example:
@@ -78,6 +82,7 @@ Gateway-owned helper/runtime flags use the namespaced `--responses-*` family, fo
 - `--responses-code-interpreter-port`
 - `--responses-code-interpreter-workers`
 - `--responses-code-interpreter-startup-timeout`
+- `--responses-web-search-profile`
 - `--responses-mcp-config`
 - `--responses-mcp-port`
 

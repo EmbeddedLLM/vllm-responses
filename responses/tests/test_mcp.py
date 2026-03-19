@@ -19,11 +19,13 @@ from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from sse_test_utils import extract_completed_response, parse_sse_frames, parse_sse_json_events
 
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints import llm as mock_llm
 from vllm_responses.entrypoints._state import VRAppState
 from vllm_responses.mcp.config import (
     McpRuntimeConfig,
     load_mcp_runtime_config,
+    merge_mcp_runtime_configs,
     split_hosted_server_entry,
 )
 from vllm_responses.mcp.gateway_toolset import McpGatewayToolset
@@ -54,16 +56,22 @@ from vllm_responses.responses_core.models import (
     UsageFinal,
 )
 from vllm_responses.responses_core.normalizer import PydanticAINormalizer
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import (
+    build_builtin_mcp_runtime_config,
+    profiled_builtin_requires_mcp,
+)
 from vllm_responses.types.openai import OpenAIResponsesResponse, vLLMResponsesRequest
 from vllm_responses.utils.cassette_replay import load_cassette_yaml
-
-# ==============================
-# Fixture-shape guard
-# ==============================
 
 
 def _chat_completion_cassettes_dir() -> Path:
     return Path(__file__).resolve().parent / "cassettes" / "chat_completion"
+
+
+# ==============================
+# Fixture-shape guard
+# ==============================
 
 
 def test_mcp_hosted_step1_stream_cassette_has_tool_call_deltas() -> None:
@@ -152,6 +160,104 @@ def test_load_mcp_runtime_config_disabled_when_path_unset() -> None:
     cfg = load_mcp_runtime_config(None)
     assert cfg.enabled is False
     assert cfg.mcp_servers == {}
+
+
+def test_build_builtin_mcp_runtime_config_derives_shipped_profile_servers() -> None:
+    fetch_cfg = build_builtin_mcp_runtime_config(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id="duckduckgo_plus_fetch",
+    )
+    exa_cfg = build_builtin_mcp_runtime_config(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id="exa_mcp",
+    )
+    disabled_cfg = build_builtin_mcp_runtime_config(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id=None,
+    )
+
+    assert fetch_cfg.enabled is True
+    assert set(fetch_cfg.mcp_servers) == {"fetch"}
+    assert fetch_cfg.mcp_servers["fetch"].mcp_server_entry.model_dump(
+        exclude_none=True, round_trip=True
+    ) == {"command": "uvx", "args": ["mcp-server-fetch"]}
+
+    assert exa_cfg.enabled is True
+    assert set(exa_cfg.mcp_servers) == {"exa"}
+    assert exa_cfg.mcp_servers["exa"].mcp_server_entry.model_dump(
+        exclude_none=True, round_trip=True
+    ) == {"url": "https://mcp.exa.ai/mcp?tools=web_search_exa,crawling_exa"}
+
+    assert disabled_cfg.enabled is False
+    assert disabled_cfg.mcp_servers == {}
+
+
+def test_build_builtin_mcp_runtime_config_injects_exa_api_key_from_env() -> None:
+    exa_cfg = build_builtin_mcp_runtime_config(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id="exa_mcp",
+        env=EnvSource(environ={"EXA_API_KEY": "exa-secret-key"}),
+    )
+
+    assert exa_cfg.enabled is True
+    assert exa_cfg.mcp_servers["exa"].mcp_server_entry.model_dump(
+        exclude_none=True, round_trip=True
+    ) == {
+        "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,crawling_exa&exaApiKey=exa-secret-key"
+    }
+
+
+def test_merge_mcp_runtime_configs_generic_entries_override_builtin_defaults() -> None:
+    builtin_cfg = build_builtin_mcp_runtime_config(
+        tool_type=WEB_SEARCH_TOOL,
+        profile_id="duckduckgo_plus_fetch",
+    )
+    explicit_fetch_entry = split_hosted_server_entry(
+        {
+            "command": "custom-fetch",
+            "args": ["--stdio"],
+        }
+    )
+    generic_cfg = McpRuntimeConfig(
+        enabled=True,
+        mcp_servers={
+            "fetch": type(builtin_cfg.mcp_servers["fetch"])(
+                mcp_server_entry=explicit_fetch_entry,
+            ),
+            "local_fs": type(builtin_cfg.mcp_servers["fetch"])(
+                mcp_server_entry=split_hosted_server_entry(
+                    {
+                        "command": "uvx",
+                        "args": ["mcp-server-filesystem", "/tmp"],
+                    }
+                ),
+            ),
+        },
+    )
+
+    merged_cfg = merge_mcp_runtime_configs(builtin_cfg, generic_cfg)
+
+    assert merged_cfg.enabled is True
+    assert set(merged_cfg.mcp_servers) == {"fetch", "local_fs"}
+    assert merged_cfg.mcp_servers["fetch"].mcp_server_entry.model_dump(
+        exclude_none=True, round_trip=True
+    ) == {"command": "custom-fetch", "args": ["--stdio"]}
+
+
+def test_profiled_builtin_requires_mcp_tracks_resolved_runtime_requirements() -> None:
+    assert profiled_builtin_requires_mcp(tool_type=WEB_SEARCH_TOOL, profile_id="exa_mcp") is True
+    assert (
+        profiled_builtin_requires_mcp(
+            tool_type=WEB_SEARCH_TOOL,
+            profile_id="duckduckgo_plus_fetch",
+        )
+        is True
+    )
+    with pytest.raises(ValueError, match="Unknown profile"):
+        profiled_builtin_requires_mcp(
+            tool_type=WEB_SEARCH_TOOL,
+            profile_id="missing_profile",
+        )
 
 
 def test_load_mcp_runtime_config_parses_valid_file(tmp_path: Path) -> None:
@@ -2027,6 +2133,64 @@ async def test_hosted_mcp_toolset_uses_mcp_description_and_normalizes_missing_ty
     tool_def = tools[tool_name].tool_def
     assert tool_def.description == "List directory entries"
     assert tool_def.parameters_json_schema["type"] == "object"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("allowed_tools",),
+    [
+        (
+            [
+                {"type": "mcp", "server_label": "github_docs"},
+                {"type": "mcp", "server_label": "github_docs", "name": "search_docs"},
+            ],
+        ),
+        (
+            [
+                {"type": "mcp", "server_label": "github_docs", "name": "search_docs"},
+                {"type": "mcp", "server_label": "github_docs"},
+            ],
+        ),
+    ],
+)
+async def test_allowed_tools_mcp_server_wide_entry_remains_monotonic(
+    allowed_tools: list[dict[str, str]],
+) -> None:
+    from vllm_responses.types.openai import vLLMResponsesRequest
+
+    req = vLLMResponsesRequest.model_validate(
+        {
+            "model": "some-model",
+            "stream": False,
+            "input": [{"role": "user", "content": "hello"}],
+            "tools": [{"type": "mcp", "server_label": "github_docs"}],
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "auto",
+                "tools": allowed_tools,
+            },
+        }
+    )
+
+    run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+        builtin_mcp_runtime_client=_FakeRequestContractRegistry(
+            enabled=True,
+            servers={"github_docs": ["search_docs", "get_page"]},
+        ),
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
+    )
+
+    assert builtin_tools == []
+    assert {(ref.server_label, ref.tool_name) for ref in mcp_tool_name_map.values()} == {
+        ("github_docs", "search_docs"),
+        ("github_docs", "get_page"),
+    }
+    assert run_settings["toolsets"] is not None
+    mcp_toolset = next(
+        toolset for toolset in run_settings["toolsets"] if isinstance(toolset, McpGatewayToolset)
+    )
+    assert len(await mcp_toolset.get_tools(ctx=None)) == 2
 
 
 @pytest.mark.anyio

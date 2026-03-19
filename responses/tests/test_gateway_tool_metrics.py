@@ -5,8 +5,13 @@ import pytest
 from fastapi import FastAPI
 from prometheus_client import REGISTRY
 
+from vllm_responses.configs.builders import build_runtime_config_for_standalone
+from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints import llm as mock_llm
-from vllm_responses.entrypoints.gateway._app import augment_standalone_gateway_app
+from vllm_responses.entrypoints.gateway._app import (
+    activate_gateway_runtime,
+    augment_standalone_gateway_app,
+)
 
 
 def _sample_value(metric_name: str, labels: dict[str, str]) -> float:
@@ -26,6 +31,12 @@ def gateway_metrics_app() -> FastAPI:
         include_metrics_route=True,
         include_cors=False,
         customize_openapi=False,
+    )
+    activate_gateway_runtime(
+        app,
+        runtime_config=build_runtime_config_for_standalone(
+            env=EnvSource(environ={"VR_LLM_API_BASE": "http://mock/v1"})
+        ),
     )
     return app
 

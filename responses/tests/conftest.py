@@ -14,6 +14,7 @@ from vllm_responses.entrypoints import llm as mock_llm
 from vllm_responses.entrypoints._state import VRAppState, VRRequestState
 from vllm_responses.responses_core.store import DBResponseStore
 from vllm_responses.routers import serving
+from vllm_responses.tools.bootstrap import register_runtime_tool_handlers
 from vllm_responses.types.api import UserAgent
 from vllm_responses.utils.cassette_replay import (
     CassetteQueue,
@@ -22,6 +23,8 @@ from vllm_responses.utils.cassette_replay import (
 )
 from vllm_responses.utils.exceptions import VRException
 from vllm_responses.utils.handlers import exception_handler, path_not_found_handler
+
+register_runtime_tool_handlers()
 
 
 @pytest.fixture

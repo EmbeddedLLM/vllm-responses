@@ -42,6 +42,52 @@ class _ServeRuntimeError(RuntimeError):
         self.exit_code = int(exit_code)
 
 
+def _build_gateway_worker_env(
+    *,
+    spec: ServeSpec,
+    prometheus_multiproc_dir: Path | None,
+) -> dict[str, str]:
+    gateway_env = dict(os.environ)
+    runtime_config = spec.runtime_config
+
+    gateway_env["VR_LLM_API_BASE"] = spec.upstream.base_url
+    gateway_env["VR_HOST"] = spec.gateway.host
+    gateway_env["VR_PORT"] = str(spec.gateway.port)
+    gateway_env["VR_WORKERS"] = str(spec.gateway.workers)
+    gateway_env["VR_DB_SCHEMA_READY"] = "1"
+
+    if runtime_config.web_search_profile is not None:
+        gateway_env["VR_WEB_SEARCH_PROFILE"] = runtime_config.web_search_profile
+    else:
+        gateway_env.pop("VR_WEB_SEARCH_PROFILE", None)
+
+    if runtime_config.mcp_config_path is not None:
+        gateway_env["VR_MCP_CONFIG_PATH"] = runtime_config.mcp_config_path
+    else:
+        gateway_env.pop("VR_MCP_CONFIG_PATH", None)
+
+    if spec.mcp_runtime is not None:
+        gateway_env["VR_MCP_BUILTIN_RUNTIME_URL"] = (
+            f"http://{spec.mcp_runtime.host}:{spec.mcp_runtime.port}"
+        )
+    else:
+        gateway_env.pop("VR_MCP_BUILTIN_RUNTIME_URL", None)
+
+    if prometheus_multiproc_dir is not None:
+        gateway_env["PROMETHEUS_MULTIPROC_DIR"] = str(prometheus_multiproc_dir)
+
+    if isinstance(spec.code_interpreter, DisabledCodeInterpreterSpec):
+        gateway_env["VR_CODE_INTERPRETER_MODE"] = "disabled"
+        gateway_env.pop("VR_CODE_INTERPRETER_PORT", None)
+        gateway_env.pop("VR_CODE_INTERPRETER_WORKERS", None)
+    else:
+        gateway_env["VR_CODE_INTERPRETER_MODE"] = "external"
+        gateway_env["VR_CODE_INTERPRETER_PORT"] = str(spec.code_interpreter.port)
+        gateway_env["VR_CODE_INTERPRETER_WORKERS"] = str(spec.code_interpreter_workers)
+
+    return gateway_env
+
+
 def run_serve_spec(spec: ServeSpec) -> int:
     setup_logger_sinks(None)
     procs: list[HelperProcess] = []
@@ -165,8 +211,14 @@ def run_serve_spec(spec: ServeSpec) -> int:
 
         if spec.mcp_runtime is not None:
             mcp_runtime_env = dict(os.environ)
+            if spec.runtime_config.web_search_profile is not None:
+                mcp_runtime_env["VR_WEB_SEARCH_PROFILE"] = spec.runtime_config.web_search_profile
+            else:
+                mcp_runtime_env.pop("VR_WEB_SEARCH_PROFILE", None)
             if spec.runtime_config.mcp_config_path is not None:
                 mcp_runtime_env["VR_MCP_CONFIG_PATH"] = spec.runtime_config.mcp_config_path
+            else:
+                mcp_runtime_env.pop("VR_MCP_CONFIG_PATH", None)
             mcp_runtime_proc = spawn_logged_process(
                 log_prefix="[serve]",
                 name="mcp-runtime",
@@ -188,30 +240,10 @@ def run_serve_spec(spec: ServeSpec) -> int:
                 proc=mcp_runtime_proc.proc,
             )
 
-        gateway_env = dict(os.environ)
-        gateway_env["VR_LLM_API_BASE"] = upstream_base_url
-        gateway_env["VR_HOST"] = spec.gateway.host
-        gateway_env["VR_PORT"] = str(spec.gateway.port)
-        gateway_env["VR_WORKERS"] = str(spec.gateway.workers)
-        gateway_env["VR_DB_SCHEMA_READY"] = "1"
-        gateway_env.pop("VR_MCP_CONFIG_PATH", None)
-        if spec.mcp_runtime is not None:
-            gateway_env["VR_MCP_BUILTIN_RUNTIME_URL"] = (
-                f"http://{spec.mcp_runtime.host}:{spec.mcp_runtime.port}"
-            )
-        else:
-            gateway_env.pop("VR_MCP_BUILTIN_RUNTIME_URL", None)
-        if prometheus_multiproc_dir is not None:
-            gateway_env["PROMETHEUS_MULTIPROC_DIR"] = str(prometheus_multiproc_dir)
-
-        if isinstance(spec.code_interpreter, DisabledCodeInterpreterSpec):
-            gateway_env["VR_CODE_INTERPRETER_MODE"] = "disabled"
-            gateway_env.pop("VR_CODE_INTERPRETER_PORT", None)
-            gateway_env.pop("VR_CODE_INTERPRETER_WORKERS", None)
-        else:
-            gateway_env["VR_CODE_INTERPRETER_MODE"] = "external"
-            gateway_env["VR_CODE_INTERPRETER_PORT"] = str(spec.code_interpreter.port)
-            gateway_env["VR_CODE_INTERPRETER_WORKERS"] = str(spec.code_interpreter_workers)
+        gateway_env = _build_gateway_worker_env(
+            spec=spec,
+            prometheus_multiproc_dir=prometheus_multiproc_dir,
+        )
 
         gateway_cmd = [
             sys.executable,

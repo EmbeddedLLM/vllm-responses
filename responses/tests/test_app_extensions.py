@@ -13,6 +13,7 @@ from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints._state import VRAppState, VRRequestState
 from vllm_responses.entrypoints.gateway._app import (
     _finalize_gateway_response,
+    activate_gateway_runtime,
     augment_standalone_gateway_app,
 )
 from vllm_responses.types.api import UserAgent
@@ -27,6 +28,40 @@ def test_standalone_api_imports_cleanly_in_fresh_process() -> None:
         ],
         cwd=Path(__file__).resolve().parents[1],
         env=dict(os.environ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_standalone_api_import_does_not_build_runtime_config_from_invalid_env() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import vllm_responses.entrypoints.api",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "VR_WEB_SEARCH_PROFILE": "missing_profile"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_mcp_runtime_import_does_not_build_runtime_config_from_invalid_env() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import vllm_responses.entrypoints.mcp_runtime",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env={**os.environ, "VR_WEB_SEARCH_PROFILE": "missing_profile"},
         capture_output=True,
         text=True,
         check=False,
@@ -62,12 +97,12 @@ def test_openapi_customization_stays_lazy_for_late_routes() -> None:
     runtime_config = build_runtime_config_for_standalone(env=EnvSource(environ={}))
     augment_standalone_gateway_app(
         app,
-        runtime_config=runtime_config,
         include_upstream_proxy=False,
         include_metrics_route=False,
         include_cors=False,
         customize_openapi=True,
     )
+    activate_gateway_runtime(app, runtime_config=runtime_config)
 
     assert app.openapi_schema is None
 

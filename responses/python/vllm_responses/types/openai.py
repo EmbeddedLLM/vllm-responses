@@ -58,7 +58,8 @@ from vllm_responses.mcp.utils import (
     build_internal_mcp_tool_name,
     normalize_mcp_input_schema,
 )
-from vllm_responses.tools import CODE_INTERPRETER_TOOL, TOOLS
+from vllm_responses.tools import TOOLS
+from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL, WEB_SEARCH_TOOL
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.exceptions import BadInputError
 
@@ -101,7 +102,8 @@ class OpenAIReasoningEffort(BaseModel):
 # ---- Responses `include[]` (Open Responses schema) ----
 
 # Keep this as a finite set (enum-like) so we fail fast on typos while staying spec-aligned.
-# Note: The gateway currently only *acts upon* `code_interpreter_call.outputs` (others are parsed but ignored).
+# Note: The gateway currently acts upon `web_search_call.action.sources` and
+# `code_interpreter_call.outputs` (others are parsed but ignored).
 OpenAIResponsesInclude = Literal[
     "web_search_call.action.sources",
     "code_interpreter_call.outputs",
@@ -571,6 +573,86 @@ class OpenAICodeToolCall(BaseModel):
     ] = "code_interpreter_call"
 
 
+class OpenAIWebSearchSource(BaseModel):
+    type: Annotated[
+        Literal["url"],
+        Field(description="The type of source. Always `url`."),
+    ] = "url"
+    url: Annotated[
+        str,
+        Field(description="The canonical URL used by the web search tool."),
+    ]
+
+
+class OpenAIWebSearchActionSearch(BaseModel):
+    type: Annotated[
+        Literal["search"],
+        Field(description="The web search action type."),
+    ] = "search"
+    query: Annotated[
+        str,
+        Field(description="The primary search query executed by the tool."),
+    ]
+    queries: Annotated[
+        list[str] | None,
+        Field(description="Optional related or rewritten queries used by the tool."),
+    ] = None
+    sources: Annotated[
+        list[OpenAIWebSearchSource] | None,
+        Field(description="Optional normalized source URLs used by the search action."),
+    ] = None
+
+
+class OpenAIWebSearchActionOpenPage(BaseModel):
+    type: Annotated[
+        Literal["open_page"],
+        Field(description="The web search action type."),
+    ] = "open_page"
+    url: Annotated[
+        str | None,
+        Field(description="The page URL opened by the tool."),
+    ] = None
+
+
+class OpenAIWebSearchActionFindInPage(BaseModel):
+    type: Annotated[
+        Literal["find_in_page"],
+        Field(description="The web search action type."),
+    ] = "find_in_page"
+    pattern: Annotated[
+        str,
+        Field(description="The text pattern searched within the page."),
+    ]
+    url: Annotated[
+        str | None,
+        Field(description="The page URL searched by the tool."),
+    ] = None
+
+
+class OpenAIWebSearchToolCall(BaseModel):
+    action: (
+        Annotated[
+            OpenAIWebSearchActionSearch
+            | OpenAIWebSearchActionOpenPage
+            | OpenAIWebSearchActionFindInPage,
+            Field(discriminator="type", description="The completed web search action."),
+        ]
+        | None
+    ) = None
+    id: Annotated[
+        str,
+        Field(description="The unique ID of the web search tool call."),
+    ]
+    status: Annotated[
+        Literal["in_progress", "completed", "incomplete", "failed"],
+        Field(description="The status of the web search tool call."),
+    ]
+    type: Annotated[
+        Literal["web_search_call"],
+        Field(description="The type of the web search tool call."),
+    ] = "web_search_call"
+
+
 vLLMInput = Union[
     OpenAIInputMessage,
     OpenAIInputItem,
@@ -582,6 +664,7 @@ vLLMInput = Union[
             OpenAIFunctionToolOutput,
             OpenAIMcpToolCall,
             OpenAICodeToolCall,
+            OpenAIWebSearchToolCall,
         ],
         Discriminator("type"),
     ],
@@ -593,6 +676,7 @@ vLLMOutput = Annotated[
         OpenAIFunctionToolCall,
         OpenAIMcpToolCall,
         OpenAICodeToolCall,
+        OpenAIWebSearchToolCall,
     ],
     Discriminator("type"),
 ]
@@ -731,20 +815,18 @@ class OpenAIHostedToolChoice(BaseModel):
 
     type: Annotated[
         Literal[
-            # "file_search",
-            # "web_search_preview",
-            # "computer_use_preview",
             CODE_INTERPRETER_TOOL,
-            # "image_generation",
+            "web_search",
+            "web_search_preview",
+            "web_search_2025_08_26",
         ],
         Field(
             description=(
                 "The type of hosted tool the model should to use. Allowed values are:\n"
-                "- `file_search`\n"
-                "- `web_search_preview`\n"
-                "- `computer_use_preview`\n"
                 f"- `{CODE_INTERPRETER_TOOL}`\n"
-                "- `image_generation`"
+                "- `web_search`\n"
+                "- `web_search_preview`\n"
+                "- `web_search_2025_08_26`"
             ),
         ),
     ]
@@ -834,10 +916,163 @@ class OpenAIAllowedToolsChoice(BaseModel):
 
     def validate_vllm_hosted_tools(self) -> None:
         if any(
-            isinstance(tool, OpenAIHostedToolChoice) and tool.type != CODE_INTERPRETER_TOOL
+            isinstance(tool, OpenAIHostedToolChoice)
+            and _normalize_hosted_tool_type(tool.type)
+            not in {CODE_INTERPRETER_TOOL, WEB_SEARCH_TOOL}
             for tool in self.tools
         ):
-            raise ValueError("vLLM does not support hosted tools other than code interpreter.")
+            raise ValueError(
+                "vLLM does not support hosted tools other than code interpreter and web_search."
+            )
+
+
+def _normalize_hosted_tool_type(tool_type: str) -> str:
+    if tool_type in {"web_search_preview", "web_search_2025_08_26"}:
+        return WEB_SEARCH_TOOL
+    return tool_type
+
+
+def _apply_allowed_tools_choice(
+    *,
+    choice: OpenAIAllowedToolsChoice,
+    builtin_tools: list[Tool],
+    deferred_tools: list[ToolDefinition],
+    mcp_servers: dict[str, ResolvedMcpServerTools],
+) -> tuple[
+    list[Tool],
+    list[ToolDefinition],
+    dict[str, ResolvedMcpServerTools],
+    dict[str, dict[str, McpToolInfo]],
+]:
+    allowed_builtin_names = {
+        _normalize_hosted_tool_type(tool.type)
+        for tool in choice.tools
+        if isinstance(tool, OpenAIHostedToolChoice)
+    }
+    allowed_function_names = {
+        tool.name for tool in choice.tools if isinstance(tool, OpenAIFunctionToolChoice)
+    }
+    allowed_mcp_names_by_server: dict[str, set[str] | None] = {}
+    for tool in choice.tools:
+        if not isinstance(tool, OpenAIMcpToolChoice):
+            continue
+        if tool.server_label not in allowed_mcp_names_by_server:
+            if tool.name is None:
+                allowed_mcp_names_by_server[tool.server_label] = None
+            else:
+                allowed_mcp_names_by_server[tool.server_label] = {tool.name}
+            continue
+        existing = allowed_mcp_names_by_server[tool.server_label]
+        if existing is None:
+            continue
+        if tool.name is None:
+            allowed_mcp_names_by_server[tool.server_label] = None
+            continue
+        existing.add(tool.name)
+
+    builtin_by_name = {tool.name: tool for tool in builtin_tools}
+    missing_builtin_names = sorted(allowed_builtin_names - builtin_by_name.keys())
+    if missing_builtin_names:
+        raise BadInputError(
+            "`tool_choice.allowed_tools` references built-in tools not present in effective tools: "
+            f"{missing_builtin_names!r}."
+        )
+
+    deferred_by_name = {tool.name: tool for tool in deferred_tools}
+    missing_function_names = sorted(allowed_function_names - deferred_by_name.keys())
+    if missing_function_names:
+        raise BadInputError(
+            "`tool_choice.allowed_tools` references function tools not present in effective tools: "
+            f"{missing_function_names!r}."
+        )
+
+    selected_mcp_tool_infos_by_server: dict[str, dict[str, McpToolInfo]] = {}
+    filtered_mcp_servers: dict[str, ResolvedMcpServerTools] = {}
+    for server_label, allowed_names in allowed_mcp_names_by_server.items():
+        server_runtime = mcp_servers.get(server_label)
+        if server_runtime is None:
+            raise BadInputError(
+                "`tool_choice.allowed_tools` references an MCP `server_label` "
+                "not present in effective tools."
+            )
+        if allowed_names is None:
+            filtered_mcp_servers[server_label] = server_runtime
+            continue
+        missing_names = sorted(
+            name for name in allowed_names if name not in server_runtime.allowed_tool_infos
+        )
+        if missing_names:
+            raise BadInputError(
+                "`tool_choice.allowed_tools` references MCP tools not present in effective tools: "
+                f"server={server_label!r} names={missing_names!r}."
+            )
+        selected_mcp_tool_infos_by_server[server_label] = {
+            name: tool_info
+            for name, tool_info in server_runtime.allowed_tool_infos.items()
+            if name in allowed_names
+        }
+        filtered_mcp_servers[server_label] = server_runtime
+
+    return (
+        [tool for tool in builtin_tools if tool.name in allowed_builtin_names],
+        [tool for tool in deferred_tools if tool.name in allowed_function_names],
+        filtered_mcp_servers,
+        selected_mcp_tool_infos_by_server,
+    )
+
+
+def _build_required_tool_choice_instruction(
+    *,
+    kind: Literal["any", "allowed", "builtin", "function", "mcp"],
+    builtin_name: str | None = None,
+    function_name: str | None = None,
+    server_label: str | None = None,
+    mcp_tool_name: str | None = None,
+) -> str:
+    if kind == "builtin":
+        assert builtin_name is not None
+        return (
+            f"You must call the `{builtin_name}` tool before producing the final answer. "
+            "Do not answer directly without calling it."
+        )
+    if kind == "function":
+        assert function_name is not None
+        return (
+            f"You must call the function `{function_name}` before producing the final answer. "
+            "Do not answer directly without calling it."
+        )
+    if kind == "mcp":
+        assert server_label is not None
+        if mcp_tool_name is None:
+            return (
+                f"You must call a tool from the MCP server `{server_label}` before producing "
+                "the final answer. Do not answer directly without a tool call."
+            )
+        return (
+            f"You must call the MCP tool `{server_label}:{mcp_tool_name}` before producing "
+            "the final answer. Do not answer directly without calling it."
+        )
+    if kind == "allowed":
+        return (
+            "You must call at least one of the allowed tools before producing the final answer. "
+            "Do not answer directly without a tool call."
+        )
+    return (
+        "You must call at least one available tool before producing the final answer. "
+        "Do not answer directly without a tool call."
+    )
+
+
+def _merge_internal_instructions(
+    *,
+    user_instructions: str | None,
+    internal_instruction: str | None,
+) -> str | None:
+    if not internal_instruction:
+        return user_instructions
+    if not user_instructions:
+        return internal_instruction
+    return f"{user_instructions.rstrip()}\n\n{internal_instruction}"
 
 
 OpenAIToolChoice = Union[
@@ -1061,7 +1296,7 @@ class OpenAIResponsesWebSearchTool(BaseModel):
     """
 
     type: Annotated[
-        Literal["web_search", "web_search_2025_08_26"],
+        Literal["web_search", "web_search_preview", "web_search_2025_08_26"],
         Field(description="The type of tool."),
     ] = "web_search"
     filters: Annotated[
@@ -1131,7 +1366,10 @@ class OpenAIResponsesCodeTool(vLLMResponsesCodeTool):
 
 
 vLLMResponsesTool = Annotated[
-    vLLMResponsesCodeTool | OpenAIResponsesFunctionTool | OpenAIResponsesMcpTool,
+    vLLMResponsesCodeTool
+    | OpenAIResponsesWebSearchTool
+    | OpenAIResponsesFunctionTool
+    | OpenAIResponsesMcpTool,
     Field(discriminator="type", description="The type of tool."),
 ]
 OpenAIResponsesTool = Annotated[
@@ -1359,6 +1597,8 @@ class vLLMResponsesRequest(BaseModel):
                     tool_name = t.name
                 elif isinstance(t, vLLMResponsesCodeTool):
                     tool_name = t.type
+                elif isinstance(t, OpenAIResponsesWebSearchTool):
+                    tool_name = WEB_SEARCH_TOOL
                 elif isinstance(t, OpenAIResponsesMcpTool):
                     # MCP duplicate-by-server validation is handled in `as_run_settings(...)` where request-level
                     # validation can include runtime manager availability checks.
@@ -1615,6 +1855,31 @@ class vLLMResponsesRequest(BaseModel):
                     )
                     continue
 
+                if isinstance(msg, OpenAIWebSearchToolCall):
+                    msg_id = msg.id
+                    action_payload = (
+                        msg.action.model_dump(mode="python", exclude_none=True)
+                        if msg.action is not None
+                        else {}
+                    )
+                    message_history.append(
+                        ModelResponse(
+                            parts=[
+                                BuiltinToolCallPart(
+                                    tool_name=WEB_SEARCH_TOOL,
+                                    args=action_payload,
+                                    tool_call_id=msg_id,
+                                ),
+                                BuiltinToolReturnPart(
+                                    tool_name=WEB_SEARCH_TOOL,
+                                    content={"status": msg.status, "action": action_payload},
+                                    tool_call_id=msg_id,
+                                ),
+                            ]
+                        )
+                    )
+                    continue
+
                 if isinstance(msg, OpenAIMcpToolCall):
                     msg_id = msg.id
                     internal_tool_name = _register_internal_mcp_tool(
@@ -1676,6 +1941,8 @@ class vLLMResponsesRequest(BaseModel):
                         )
                     case vLLMResponsesCodeTool():
                         builtin_tools.append(TOOLS[CODE_INTERPRETER_TOOL])
+                    case OpenAIResponsesWebSearchTool():
+                        builtin_tools.append(TOOLS[WEB_SEARCH_TOOL])
                     case OpenAIResponsesMcpTool():
                         if t.server_label in mcp_declarations:
                             raise BadInputError(
@@ -1695,6 +1962,8 @@ class vLLMResponsesRequest(BaseModel):
                 request_remote_toolset_builder=build_request_remote_toolset,
             )
 
+        internal_tool_choice_instruction: str | None = None
+
         if self.tool_choice == "auto":
             pass
         elif self.tool_choice == "none":
@@ -1703,44 +1972,62 @@ class vLLMResponsesRequest(BaseModel):
             mcp_servers = {}
             selected_mcp_tool_infos_by_server = {}
         elif self.tool_choice == "required":
-            # TODO: Properly handle `required` tool choice by setting
-            # output_type=[ToolOutput(tool.function), DeferredToolRequests]
-
-            #     output_type = [
-            #         ToolOutput(
-            #             t.function,
-            #             name=t.name,
-            #             description=t.description,
-            #         )
-            #         for t in tools
-            #     ]
-            #     output_type += [
-            #         StructuredDict(
-            #             json_schema=t.parameters,
-            #             name=t.name,
-            #             description=t.description,
-            #         )
-            #         for t in self.tools
-            #         if isinstance(t, OpenAIResponsesFunctionTool)
-            #     ]
-            pass
+            if not builtin_tools and not deferred_tools and not mcp_servers:
+                raise BadInputError(
+                    '`tool_choice="required"` requires at least one effective tool.'
+                )
+            internal_tool_choice_instruction = _build_required_tool_choice_instruction(kind="any")
         elif isinstance(self.tool_choice, OpenAIAllowedToolsChoice):
+            (
+                builtin_tools,
+                deferred_tools,
+                mcp_servers,
+                selected_mcp_tool_infos_by_server,
+            ) = _apply_allowed_tools_choice(
+                choice=self.tool_choice,
+                builtin_tools=builtin_tools,
+                deferred_tools=deferred_tools,
+                mcp_servers=mcp_servers,
+            )
             if self.tool_choice.mode == "auto":
                 pass
             else:
-                # TODO: Properly handle `required` tool choice by setting
-                # output_type=[ToolOutput(tool.function), DeferredToolRequests]
-                pass
+                if not builtin_tools and not deferred_tools and not mcp_servers:
+                    raise BadInputError(
+                        '`tool_choice.allowed_tools` with `mode="required"` '
+                        "requires at least one effective tool."
+                    )
+                internal_tool_choice_instruction = _build_required_tool_choice_instruction(
+                    kind="allowed"
+                )
         elif isinstance(self.tool_choice, OpenAIHostedToolChoice):
-            builtin_tools = [t for t in builtin_tools if t.name == self.tool_choice.type]
+            requested_builtin = _normalize_hosted_tool_type(self.tool_choice.type)
+            builtin_tools = [t for t in builtin_tools if t.name == requested_builtin]
+            if not builtin_tools:
+                raise BadInputError(
+                    f"`tool_choice.type={self.tool_choice.type!r}` references a built-in tool "
+                    "not present in effective tools."
+                )
             deferred_tools = []
             mcp_servers = {}
             selected_mcp_tool_infos_by_server = {}
+            internal_tool_choice_instruction = _build_required_tool_choice_instruction(
+                kind="builtin",
+                builtin_name=requested_builtin,
+            )
         elif isinstance(self.tool_choice, OpenAIFunctionToolChoice):
             builtin_tools = []
             deferred_tools = [t for t in deferred_tools if t.name == self.tool_choice.name]
+            if not deferred_tools:
+                raise BadInputError(
+                    f"`tool_choice.name` {self.tool_choice.name!r} is not present in effective tools."
+                )
             mcp_servers = {}
             selected_mcp_tool_infos_by_server = {}
+            internal_tool_choice_instruction = _build_required_tool_choice_instruction(
+                kind="function",
+                function_name=self.tool_choice.name,
+            )
         elif isinstance(self.tool_choice, OpenAIMcpToolChoice):
             if not mcp_servers:
                 raise BadInputError(
@@ -1764,6 +2051,11 @@ class vLLMResponsesRequest(BaseModel):
             selected_mcp_tool_infos_by_server = {self.tool_choice.server_label: selected_tools}
             builtin_tools = []
             deferred_tools = []
+            internal_tool_choice_instruction = _build_required_tool_choice_instruction(
+                kind="mcp",
+                server_label=self.tool_choice.server_label,
+                mcp_tool_name=self.tool_choice.name,
+            )
         else:
             raise BadInputError(f"Invalid `tool_choice` provided: {self.tool_choice}.")
 
@@ -1817,7 +2109,10 @@ class vLLMResponsesRequest(BaseModel):
             toolsets.append(ExternalToolset(tool_defs=deferred_tools))
         run_settings: AgentRunSettings = {
             "message_history": message_history,
-            "instructions": self.instructions,
+            "instructions": _merge_internal_instructions(
+                user_instructions=self.instructions,
+                internal_instruction=internal_tool_choice_instruction,
+            ),
             "toolsets": toolsets or None,
             # Parity note: do not enforce request `max_tool_calls` in pydantic_ai runtime limits.
             # Keep `max_tool_calls` as request/response metadata only, matching observed OpenAI behavior.

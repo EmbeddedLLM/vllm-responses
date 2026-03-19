@@ -16,6 +16,11 @@ from vllm_responses.tools.code_interpreter import (
     run_code,
     start_server,
 )
+from vllm_responses.tools.runtime import (
+    ToolRuntimeContext,
+    bind_tool_runtime_context,
+    get_tool_runtime_context,
+)
 from vllm_responses.utils.exceptions import BadInputError
 
 pytestmark = pytest.mark.anyio
@@ -163,6 +168,33 @@ async def test_run_code_rejects_disabled_runtime_config() -> None:
     with bind_runtime_config(runtime_config):
         with pytest.raises(BadInputError, match="disabled by configuration"):
             await run_code("print('blocked')")
+
+
+async def test_bind_runtime_config_preserves_existing_tool_runtime_context() -> None:
+    original_runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "6112"}
+        )
+    )
+    replacement_runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={"VR_CODE_INTERPRETER_MODE": "external", "VR_CODE_INTERPRETER_PORT": "6113"}
+        )
+    )
+    sentinel_web_search = object()
+
+    with bind_tool_runtime_context(
+        ToolRuntimeContext(
+            runtime_config=original_runtime_config,
+            web_search=sentinel_web_search,  # type: ignore[arg-type]
+        )
+    ):
+        with bind_runtime_config(replacement_runtime_config):
+            bound_context = get_tool_runtime_context()
+
+    assert bound_context is not None
+    assert bound_context.runtime_config.code_interpreter_port == 6113
+    assert bound_context.web_search is sentinel_web_search
 
 
 async def test_start_server_uses_runtime_config_startup_timeout(monkeypatch) -> None:

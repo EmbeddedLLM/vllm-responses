@@ -15,6 +15,9 @@ from vllm_responses.responses_core.models import (
     MessageDone,
     MessageStarted,
     UsageFinal,
+    WebSearchCallCompleted,
+    WebSearchCallSearching,
+    WebSearchCallStarted,
 )
 from vllm_responses.types.openai import OpenAIResponsesResponse
 
@@ -271,3 +274,114 @@ def test_code_interpreter_outputs_include_stdout_and_final_expression():
     outputs = ci_done[0].item.outputs
     assert outputs is not None
     assert [o.logs for o in outputs if o.type == "logs"] == ["P1\nP2\n", "4"]
+
+
+def test_web_search_output_uses_generic_event_family() -> None:
+    composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
+
+    out = _drain(
+        composer,
+        [
+            WebSearchCallStarted(item_key="ws1"),
+            WebSearchCallSearching(item_key="ws1"),
+            WebSearchCallCompleted(
+                item_key="ws1",
+                action_type="search",
+                query="example query",
+                queries=("example query", "rewritten query"),
+                sources=({"type": "url", "url": "https://example.com/a"},),
+            ),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=0,
+            ),
+        ],
+    )
+
+    assert [event.type for event in out if event.type.startswith("response.web_search_call.")] == [
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+    ]
+    assert not any(event.type.startswith("response.function_call_arguments.") for event in out)
+
+    added_item = next(
+        event.item
+        for event in out
+        if event.type == "response.output_item.added" and event.item.type == "web_search_call"
+    )
+    assert added_item.status == "in_progress"
+    assert added_item.action is None
+
+
+def test_web_search_sources_are_include_gated() -> None:
+    composer = ResponseComposer(
+        response=OpenAIResponsesResponse(model="test-model"),
+        include={"web_search_call.action.sources"},
+    )
+
+    out = _drain(
+        composer,
+        [
+            WebSearchCallStarted(item_key="ws1"),
+            WebSearchCallCompleted(
+                item_key="ws1",
+                action_type="search",
+                query="example query",
+                sources=({"type": "url", "url": "https://example.com/a"},),
+            ),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=0,
+            ),
+        ],
+    )
+
+    done_item = next(
+        event.item
+        for event in out
+        if event.type == "response.output_item.done" and event.item.type == "web_search_call"
+    )
+    assert done_item.action is not None
+    assert done_item.action.type == "search"
+    assert done_item.action.sources is not None
+    assert done_item.action.sources[0].url == "https://example.com/a"
+
+    composer_without_sources = ResponseComposer(
+        response=OpenAIResponsesResponse(model="test-model")
+    )
+    out_without_sources = _drain(
+        composer_without_sources,
+        [
+            WebSearchCallStarted(item_key="ws2"),
+            WebSearchCallCompleted(
+                item_key="ws2",
+                action_type="search",
+                query="example query",
+                sources=({"type": "url", "url": "https://example.com/a"},),
+            ),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=0,
+            ),
+        ],
+    )
+    done_item_without_sources = next(
+        event.item
+        for event in out_without_sources
+        if event.type == "response.output_item.done" and event.item.type == "web_search_call"
+    )
+    assert done_item_without_sources.action is not None
+    assert done_item_without_sources.action.sources is None

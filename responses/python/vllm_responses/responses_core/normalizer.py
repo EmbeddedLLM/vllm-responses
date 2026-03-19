@@ -48,6 +48,16 @@ from vllm_responses.responses_core.models import (
     ReasoningDone,
     ReasoningStarted,
     UsageFinal,
+    WebSearchCallCompleted,
+    WebSearchCallSearching,
+    WebSearchCallStarted,
+)
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.web_search.types import (
+    FindInPageActionPublic,
+    OpenPageActionPublic,
+    SearchActionPublic,
+    parse_web_search_tool_result,
 )
 
 
@@ -128,6 +138,11 @@ class PydanticAINormalizer:
                 return
 
             if tool_name in self._builtin_tool_names:
+                if tool_name == WEB_SEARCH_TOOL:
+                    record_tool_call_requested("web_search")
+                    self._item_kind[item_key] = "web_search_call"
+                    yield WebSearchCallStarted(item_key=item_key)
+                    return
                 if tool_name != self._code_interpreter_tool_name:
                     return
                 record_tool_call_requested("code_interpreter")
@@ -201,6 +216,9 @@ class PydanticAINormalizer:
                 )
                 return
 
+            if kind == "web_search_call":
+                return
+
             if delta.args_delta is None:
                 return
             yield FunctionCallArgumentsDelta(
@@ -229,6 +247,8 @@ class PydanticAINormalizer:
             if kind == "code_interpreter_call":
                 code = part.args_as_dict().get("code")
                 yield CodeInterpreterCallCodeDone(item_key=tool_item_key, code=code)
+            elif kind == "web_search_call":
+                return
             elif kind == "mcp_call":
                 yield McpCallArgumentsDone(
                     item_key=tool_item_key,
@@ -242,6 +262,10 @@ class PydanticAINormalizer:
 
     def _on_function_tool_call(self, event: FunctionToolCallEvent) -> Iterable[NormalizedEvent]:
         if event.part.tool_name != self._code_interpreter_tool_name:
+            if event.part.tool_name == WEB_SEARCH_TOOL:
+                item_key = self._tool_call_id_to_item_key.get(event.part.tool_call_id)
+                if item_key:
+                    yield WebSearchCallSearching(item_key=item_key)
             return
         item_key = self._tool_call_id_to_item_key.get(event.tool_call_id)
         if item_key:
@@ -258,9 +282,50 @@ class PydanticAINormalizer:
             yield from self._on_mcp_tool_result(event=event, item_key=item_key)
             return
 
+        if event.result.tool_name == WEB_SEARCH_TOOL:
+            yield from self._on_web_search_tool_result(event=event, item_key=item_key)
+            return
+
         if event.result.tool_name != self._code_interpreter_tool_name:
             return
         yield from self._on_code_interpreter_tool_result(event=event, item_key=item_key)
+
+    def _on_web_search_tool_result(
+        self, *, event: FunctionToolResultEvent, item_key: str
+    ) -> Iterable[NormalizedEvent]:
+        raw = self._result_raw_text(event.result)
+        if raw is None:
+            return
+        payload = parse_web_search_tool_result(raw)
+        action = payload.action
+        action_type = action.type
+        source_items: tuple[dict[str, str], ...] = ()
+        query: str | None = None
+        queries: tuple[str, ...] = ()
+        url: str | None = None
+        pattern: str | None = None
+
+        if isinstance(action, SearchActionPublic):
+            query = action.query
+            queries = tuple(action.queries or ())
+            source_items = tuple(
+                {"type": source.type, "url": source.url} for source in (action.sources or [])
+            )
+        elif isinstance(action, OpenPageActionPublic):
+            url = action.url
+        elif isinstance(action, FindInPageActionPublic):
+            url = action.url
+            pattern = action.pattern
+
+        yield WebSearchCallCompleted(
+            item_key=item_key,
+            action_type=action_type,
+            query=query,
+            queries=queries,
+            sources=source_items,
+            url=url,
+            pattern=pattern,
+        )
 
     def _on_mcp_tool_result(
         self, *, event: FunctionToolResultEvent, item_key: str

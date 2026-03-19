@@ -10,9 +10,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 from starlette.background import BackgroundTask
 
-from vllm_responses.configs.builders import build_runtime_config_for_standalone
 from vllm_responses.configs.runtime import INTERNAL_UPSTREAM_HEADER_NAME, RuntimeConfig
-from vllm_responses.configs.sources import EnvSource
 from vllm_responses.db import configure_db
 from vllm_responses.entrypoints._state import (
     CURRENT_REQUEST_ID,
@@ -33,6 +31,7 @@ from vllm_responses.observability.metrics import (
 )
 from vllm_responses.responses_core.store import configure_response_store
 from vllm_responses.routers import mcp, serving, upstream_proxy
+from vllm_responses.tools.bootstrap import register_runtime_tool_handlers
 from vllm_responses.tools.code_interpreter import configure_code_interpreter
 from vllm_responses.types.api import UserAgent
 from vllm_responses.utils import uuid7_str
@@ -47,24 +46,23 @@ _LOGGED_REQUEST_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
 
 
 def _activate_runtime_config(runtime_config: RuntimeConfig) -> None:
+    register_runtime_tool_handlers()
     configure_metrics(runtime_config)
     configure_db(runtime_config)
     configure_response_store(runtime_config)
     configure_code_interpreter(runtime_config)
 
 
-def ensure_app_state(app: FastAPI, *, runtime_config: RuntimeConfig | None = None) -> None:
+def ensure_app_state(app: FastAPI) -> VRAppState:
     if get_vr_app_state(app) is None:
         app.state.vllm_responses = VRAppState()
-    app_state = get_vr_app_state(app)
-    assert app_state is not None
-    if app_state.runtime_config is None:
-        app_state.runtime_config = (
-            build_runtime_config_for_standalone(env=EnvSource.from_env())
-            if runtime_config is None
-            else runtime_config
-        )
-    _activate_runtime_config(app_state.runtime_config)
+    return require_vr_app_state(app)
+
+
+def activate_gateway_runtime(app: FastAPI, *, runtime_config: RuntimeConfig) -> None:
+    app_state = ensure_app_state(app)
+    app_state.runtime_config = runtime_config
+    _activate_runtime_config(runtime_config)
 
 
 def _is_internal_upstream_request(
@@ -250,14 +248,13 @@ def install_standalone_gateway_request_middleware(
 def augment_standalone_gateway_app(
     app: FastAPI,
     *,
-    runtime_config: RuntimeConfig | None = None,
     include_upstream_proxy: bool,
     include_metrics_route: bool,
     include_cors: bool,
     customize_openapi: bool,
     internal_upstream_header: str | None = None,
 ) -> FastAPI:
-    ensure_app_state(app, runtime_config=runtime_config)
+    ensure_app_state(app)
     ensure_gateway_metrics_registered()
     if include_metrics_route:
         install_prometheus_metrics_endpoint(app)
@@ -291,7 +288,7 @@ def augment_standalone_gateway_app(
 
 
 def augment_integrated_gateway_app(app: FastAPI, *, runtime_config: RuntimeConfig) -> FastAPI:
-    ensure_app_state(app, runtime_config=runtime_config)
+    activate_gateway_runtime(app, runtime_config=runtime_config)
     ensure_gateway_metrics_registered()
     serving_router = APIRouter(route_class=IntegratedGatewayRoute)
     serving.install_routes(serving_router)

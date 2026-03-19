@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-ItemKind = Literal["message", "reasoning", "function_call", "code_interpreter_call", "mcp_call"]
+ItemKind = Literal[
+    "message",
+    "reasoning",
+    "function_call",
+    "code_interpreter_call",
+    "mcp_call",
+    "web_search_call",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +99,27 @@ class CodeInterpreterCallCompleted:
 
 
 @dataclass(frozen=True, slots=True)
+class WebSearchCallStarted:
+    item_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class WebSearchCallSearching:
+    item_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class WebSearchCallCompleted:
+    item_key: str
+    action_type: Literal["search", "open_page", "find_in_page"]
+    query: str | None = None
+    queries: tuple[str, ...] = ()
+    sources: tuple[dict[str, str], ...] = ()
+    url: str | None = None
+    pattern: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class McpCallStarted:
     item_key: str
     server_label: str
@@ -150,6 +178,9 @@ NormalizedEvent = (
     | CodeInterpreterCallCodeDone
     | CodeInterpreterCallInterpreting
     | CodeInterpreterCallCompleted
+    | WebSearchCallStarted
+    | WebSearchCallSearching
+    | WebSearchCallCompleted
     | McpCallStarted
     | McpCallArgumentsDelta
     | McpCallArgumentsDone

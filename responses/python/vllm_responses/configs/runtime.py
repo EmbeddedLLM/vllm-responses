@@ -21,6 +21,7 @@ class RuntimeConfig:
 
     llm_api_base: str
     openai_api_key: str | None
+    web_search_profile: str | None
 
     code_interpreter_mode: CodeInterpreterMode
     code_interpreter_port: int | None

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from vllm_responses.configs.builders import build_runtime_config_for_standalone
 from vllm_responses.configs.sources import EnvSource
-from vllm_responses.mcp.config import load_mcp_runtime_config
+from vllm_responses.mcp.config import load_mcp_runtime_config, merge_mcp_runtime_configs
 from vllm_responses.mcp.hosted_registry import (
     HostedMCPRegistry,
     HostedMcpStaleToolError,
@@ -16,10 +16,10 @@ from vllm_responses.mcp.hosted_registry import (
 )
 from vllm_responses.mcp.runtime_client import MCP_TOOL_NOT_FOUND_PREFIX
 from vllm_responses.mcp.utils import canonicalize_output_text, redact_and_truncate_error_text
+from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.profile_resolution import build_builtin_mcp_runtime_config
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.exceptions import BadInputError
-
-_RUNTIME_CONFIG = build_runtime_config_for_standalone(env=EnvSource.from_env())
 
 
 class _CallToolRequest(BaseModel):
@@ -29,11 +29,20 @@ class _CallToolRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    mcp_runtime_config = load_mcp_runtime_config(_RUNTIME_CONFIG.mcp_config_path)
+    env = EnvSource.from_env()
+    runtime_config = build_runtime_config_for_standalone(env=env)
+    mcp_runtime_config = merge_mcp_runtime_configs(
+        build_builtin_mcp_runtime_config(
+            tool_type=WEB_SEARCH_TOOL,
+            profile_id=runtime_config.web_search_profile,
+            env=env,
+        ),
+        load_mcp_runtime_config(runtime_config.mcp_config_path),
+    )
     registry = HostedMCPRegistry(
         config=mcp_runtime_config,
-        startup_timeout_s=_RUNTIME_CONFIG.mcp_hosted_startup_timeout_sec,
-        tool_timeout_s=_RUNTIME_CONFIG.mcp_hosted_tool_timeout_sec,
+        startup_timeout_s=runtime_config.mcp_hosted_startup_timeout_sec,
+        tool_timeout_s=runtime_config.mcp_hosted_tool_timeout_sec,
     )
     await registry.startup()
     app.state.hosted_mcp_registry = registry
@@ -165,3 +174,10 @@ async def call_mcp_server_tool(
         "output_text": canonicalize_output_text(raw),
         "error_text": None,
     }
+
+
+if __name__ == "__main__":
+    raise SystemExit(
+        "Direct execution of vllm_responses.entrypoints.mcp_runtime is unsupported. "
+        "Use `vllm-responses serve` or `vllm serve --responses`."
+    )
