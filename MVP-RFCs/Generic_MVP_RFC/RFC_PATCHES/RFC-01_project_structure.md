@@ -91,40 +91,7 @@ We propose organizing the project into six conceptual layers. The names below ar
 | 5 | **MCP Integration** | Hosted and request-remote MCP server management, tool name mapping, and security enforcement. |
 | 6 | **Config & Shared Foundations** | Immutable configuration, database connections, observability hooks, and any shared utilities. We suggest this layer should not depend on layers 1–5. |
 
----
 
-## 5. Layer Dependency Rules
-
-We propose the following dependency rules as documented conventions. Violations should be treated as bugs worth fixing.
-
-```
-Entry Points
-    └── may import from → HTTP Routing, Config & Shared Foundations
-
-HTTP Routing
-    └── may import from → Core Orchestration, Config & Shared Foundations
-
-Core Orchestration
-    └── may import from → Tool Runtimes, MCP Integration, Config & Shared Foundations
-
-Tool Runtimes
-    └── may import from → Config & Shared Foundations
-
-MCP Integration
-    └── may import from → Config & Shared Foundations
-
-Config & Shared Foundations
-    └── may import from → (nothing within this project)
-```
-
-Key rules (we believe these are reasonable starting points, though we welcome alternatives):
-
-- **No upward imports.** We suggest a lower layer should not import from a higher layer.
-- **No cross-sibling imports.** Ideally, Tool Runtimes and MCP Integration would not import each other; both would be coordinated by Core Orchestration.
-- **Entry points are thin.** Layer 1 should contain almost no business logic.
-- **Foundations are a leaf.** If a utility function appears to need something from a higher layer, that is a signal to rethink the abstraction.
-
----
 
 ## Open Questions
 
@@ -132,8 +99,6 @@ The following questions are left explicitly open for community discussion.
 
 **On project structure:**
 
-1. **Monorepo vs. multi-repo.** As the project matures, should tool runtimes or MCP integration be extracted into separately versioned packages? We would love to hear from the community on this.
-2. **Language boundaries.** This RFC assumes a primary server language with a separate runtime process for the code interpreter (discussed in RFC-B). Is a two-language approach acceptable, or should there be a single-language constraint? Your input here would be especially valuable.
-3. **Layer naming.** We welcome better names than "Core Orchestration" and "Config & Shared Foundations."
-4. **Plugin architecture.** Should tool runtimes be loadable as plugins at runtime? A plugin architecture enables community extensions without forking, but adds complexity. We would love to hear from the community on this.
-5. **Dependency enforcement.** What tooling, if any, should enforce layer dependency rules in CI? Your input here would be especially valuable.
+1. **Layer naming.** We welcome better names than "Core Orchestration" and "Config & Shared Foundations."
+2. **Plugin architecture.** Should tool runtimes be loadable as plugins at runtime? A plugin architecture enables community extensions without forking, but adds complexity. We would love to hear from the community on this.
+3. **Dependency enforcement.** What tooling, if any, should enforce layer dependency rules in CI? Your input here would be especially valuable.
