@@ -10,7 +10,7 @@
 
 ### 6.1 The Problem
 
-Standard Chat Completions requires the client to send the entire conversation history on every request. The Responses API solves this with a single field: `previous_response_id`. The gateway would need to store enough state after each response to fully reconstruct the conversation for the next turn.
+Without statefulness, clients must send their entire conversation history on every request. The Responses API solves this with a single field: `previous_response_id`. The gateway would need to store enough state after each response to fully reconstruct the conversation for the next turn.
 
 ```
 Turn 1:  client sends { input: "My name is Alice." }
@@ -105,7 +105,7 @@ Request Orchestrator
     │
     ├── 2. Assemble full history using rehydration rule
     │
-    ├── 3. Send to upstream LLM (Chat Completions)
+    ├── 3. Send to upstream LLM (Responses API)
     │        stream delta chunks through the event pipeline
     │
     ├── 4. Stream translated SSE events to client (real-time)

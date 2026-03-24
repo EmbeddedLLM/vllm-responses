@@ -65,7 +65,7 @@ The failure record should be assembled from counters that are updated on every i
     │  response.created
     │  response.in_progress
     ▼
-  Upstream LLM call (Chat Completions streaming)
+  Upstream LLM call (Responses API streaming)
     │  tool loop: if LLM requests tool → execute → feed result back → continue
     ▼
   Normalizer processes each LLM framework event

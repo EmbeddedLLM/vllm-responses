@@ -6,11 +6,11 @@
 
 ## 1. Overview
 
-This RFC describes the foundational architecture of **agentic-stack**: an open-source gateway that adapts a stateless LLM inference backend (any Chat Completions-compatible server) into a stateful, tool-capable Responses API endpoint.
+This RFC describes the foundational architecture of **agentic-stack**: an open-source gateway that adapts a stateless LLM inference backend into a stateful, tool-capable Responses API endpoint.
 
 The core challenges the system would need to address are:
 
-1. **Statefulness.** Chat Completions requires the client to send full conversation history on every request. The Responses API allows the client to send only new input and reference a prior response by ID. The gateway would need to bridge this gap.
+1. **Statefulness.** Without statefulness, clients must send their full conversation history on every request. The Responses API allows the client to send only new input and reference a prior response by ID. The gateway would need to bridge this gap.
 2. **Protocol translation.** The upstream server produces stateless delta chunks. Clients expect typed, sequenced SSE events with stable item IDs and lifecycle events per output item type.
 3. **Tool execution.** Built-in tools (code interpreter, web search) and MCP tools would need to be executed by the gateway mid-request, invisibly to the client.
 
@@ -36,7 +36,7 @@ We propose a six-layer package structure, a single-table response store, and a t
 
 ## 3. System Overview
 
-The system sits between client applications and a Chat Completions-compatible upstream LLM server. It adds statefulness, tool execution, and Responses API protocol compliance on top of whatever inference backend the operator points it at.
+The system sits between client applications and an upstream LLM server. It adds statefulness, tool execution, and Responses API protocol compliance on top of whatever inference backend the operator points it at.
 
 ```mermaid
 sequenceDiagram
@@ -50,7 +50,7 @@ sequenceDiagram
     Client->>Gateway: POST /v1/responses (with previous_response_id)
     Gateway->>DB/ResponseStore: Load prior conversation history
     DB/ResponseStore-->>Gateway: Rehydrated message list
-    Gateway->>vLLM Server: POST /v1/chat/completions (full history)
+    Gateway->>vLLM Server: POST /v1/responses (full history)
     vLLM Server-->>Gateway: Streaming delta chunks
 
     loop Tool calls in response
@@ -74,7 +74,7 @@ A few notes on this diagram:
 - The "Gateway" represents the HTTP routing and core orchestration layers acting together.
 - The tool call loop may iterate multiple times if the model produces sequential tool calls.
 - The SSE stream to the client is interleaved with the tool loop — events are emitted in real time, not buffered until the response is complete.
-- The "vLLM Server" participant represents any Chat Completions-compatible upstream; it does not have to be vLLM specifically.
+- The "vLLM Server" participant represents any Responses API-compatible upstream; it does not have to be vLLM specifically.
 
 ---
 

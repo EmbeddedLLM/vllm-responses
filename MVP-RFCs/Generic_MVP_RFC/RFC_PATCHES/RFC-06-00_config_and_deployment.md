@@ -24,7 +24,7 @@ Configuration Object (proposed groups)
 │   └── Maximum concurrent requests
 │
 ├── Upstream LLM
-│   ├── Base URL for the Chat Completions API
+│   ├── Base URL for the Responses API
 │   └── Optional bearer token for upstream authentication
 │
 ├── Tool Settings

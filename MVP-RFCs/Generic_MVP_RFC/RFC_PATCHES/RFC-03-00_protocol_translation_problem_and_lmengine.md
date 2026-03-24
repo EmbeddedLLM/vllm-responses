@@ -10,11 +10,11 @@
 
 ### 8.1 The Translation Problem
 
-The upstream LLM server speaks Chat Completions. Clients expect the Responses API. These are fundamentally different protocols:
+The upstream LLM server produces a raw streaming response format. Clients expect the richer Responses API. These differ in several fundamental ways:
 
 ```
 ┌─────────────────────────────┬──────────────────────────────────────┐
-│  Chat Completions           │  Responses API                       │
+│  Upstream (raw streaming)   │  Responses API                       │
 ├─────────────────────────────┼──────────────────────────────────────┤
 │  Stateless — client sends   │  Stateful — client sends only new    │
 │  full history every time    │  input + previous_response_id        │
@@ -31,7 +31,7 @@ The upstream LLM server speaks Chat Completions. Clients expect the Responses AP
 └─────────────────────────────┴──────────────────────────────────────┘
 ```
 
-The gateway bridges this gap entirely in software, without touching the upstream server.
+The gateway would bridge this gap entirely in software, without touching the upstream server.
 
 ### 8.2 HTTP Layer
 
