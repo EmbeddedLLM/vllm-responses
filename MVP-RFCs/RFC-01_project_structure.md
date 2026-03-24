@@ -265,10 +265,37 @@ agentic_stack/
 ## 6. Where Each RFC Goes From Here
 
 ```
-RFC-02  →  responses_core/  (normalizer, composer, sse) + lm.py
-RFC-03  →  responses_core/store.py + db.py + utils/cache.py
-RFC-04  →  tools/code_interpreter/ + tools/web_search/
-RFC-05  →  mcp/
+RFC-02  ResponseStore: Conversation Memory
+  RFC-02-00  →  responses_core/store.py
+                Storage model, StoredResponsePayload, rehydration rule
+  RFC-02-01  →  db.py, utils/cache.py
+                DB schema, engine factory (SQLite/Postgres), Redis hot cache
+
+RFC-03  Protocol Translation & SSE Event Pipeline
+  RFC-03-00  →  routers/serving.py, lm.py
+                Translation problem, request entry point, LMEngine lifecycle
+  RFC-03-01  →  responses_core/normalizer.py, composer.py, sse.py, models.py
+                Three-stage pipeline, NormalizedEvent type system (22 types)
+  RFC-03-02  →  lm.py, lm_failures.py, responses_core/sse.py
+                Stream vs non-stream paths, failure classification, e2e flow
+
+RFC-04  Built-in Tools
+  RFC-04-00  →  tools/code_interpreter/
+                Code Interpreter: Pyodide/Bun sidecar, execution model, worker pool
+  RFC-04-01  →  tools/web_search/
+                Web Search: action model, profile+adapter pattern, page cache
+
+RFC-05  MCP Integration
+  RFC-05-00  →  mcp/config.py, mcp/hosted_registry.py
+                Hosted MCP: config file, HostedMCPRegistry lifecycle
+  RFC-05-01  →  mcp/resolver.py, mcp/policy.py, mcp/types.py
+                Request-remote MCP, resolver, security policy, e2e flow
+
+RFC-06  Config & Infrastructure
+  RFC-06-00  →  configs/, entrypoints/
+                RuntimeConfig, deployment modes, environment variable reference
+  RFC-06-01  →  observability/metrics.py, observability/tracing.py, utils/logging.py
+                Prometheus metrics, OpenTelemetry tracing, logging
 ```
 
 ---
