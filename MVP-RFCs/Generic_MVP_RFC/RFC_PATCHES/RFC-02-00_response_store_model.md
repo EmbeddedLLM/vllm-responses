@@ -36,6 +36,8 @@ Stored Payload
 └── system instructions    any system prompt active in this turn
 ```
 
+**GPT-OSS / Harmony note.** GPT-OSS models produce reasoning output items (from the Harmony `analysis` channel) alongside text and tool call output items. vLLM surfaces these as standard `ResponseReasoningItem` objects in the Responses API output, so they are already covered by the `model output` field above. No separate storage field is needed. The rehydration rule in section 6.3 applies unchanged — the full output, including any reasoning items, is stored and prepended to the next turn's input.
+
 Tools, tool choice, and system instructions are stored alongside the response so the next turn can inherit them if the client omits them.
 
 ### 6.3 The Rehydration Rule

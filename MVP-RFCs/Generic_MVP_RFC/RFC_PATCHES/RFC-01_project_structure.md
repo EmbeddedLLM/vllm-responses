@@ -86,7 +86,7 @@ We propose organizing the project into six conceptual layers. The names below ar
 |---|-------|---------------|
 | 1 | **Entry Points** | Process startup, signal handling, integration with the chosen ASGI server or supervisor. These modules should be thin wrappers that assemble the application and hand control to the HTTP layer. |
 | 2 | **HTTP Routing** | Route definitions, request parsing and validation, response serialization. Receives raw HTTP requests and produces structured objects for the orchestration layer. Owns the SSE streaming loop. |
-| 3 | **Core Orchestration** | The central request lifecycle: history rehydration, upstream LLM calls, protocol translation, tool dispatch, and response persistence. The most complex logic lives here. |
+| 3 | **Core Orchestration** | The central request lifecycle: history rehydration, upstream LLM calls, protocol translation, tool dispatch, and response persistence. The most complex logic lives here. Under the proposed D1 decision (gateway calls `POST /v1/responses` on vLLM), this layer is model-agnostic — GPT-OSS/Harmony rendering and parsing are handled transparently by the upstream vLLM server, so the gateway does not need model-specific branches here. |
 | 4 | **Tool Runtimes** | Built-in tool implementations (code interpreter, web search). Each runtime should be self-contained with a well-defined interface: start, health-check, execute, shut down. |
 | 5 | **MCP Integration** | Hosted and request-remote MCP server management, tool name mapping, and security enforcement. |
 | 6 | **Config & Shared Foundations** | Immutable configuration, database connections, observability hooks, and any shared utilities. We suggest this layer should not depend on layers 1–5. |

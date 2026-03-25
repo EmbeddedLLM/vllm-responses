@@ -29,6 +29,8 @@ The benefit of this design is that swapping the LLM framework (Stage 1) or the w
 
 The Normalizer translates framework-specific streaming events into intermediate typed events. Under this proposal, it would be the primary component that knows about the LLM framework internals.
 
+**GPT-OSS / Harmony note.** Under the proposed D1 decision (gateway calls `POST /v1/responses` on vLLM), the Normalizer is already model-agnostic: vLLM handles all Harmony-specific rendering and parsing before events reach the gateway, so the Normalizer receives standard Responses API output items regardless of whether the upstream model is GPT-OSS or a Jinja-based model. If a future decision moves below `POST /v1/responses` (e.g. toward an internal vLLM protocol as proposed in Q4 of ADR-01), a GPT-OSS-aware Normalizer branch would be needed to handle Harmony `channel` and `recipient` fields directly. The event categories in the table below already cover the full range of GPT-OSS output types — reasoning, function calls, web search, and MCP calls are all represented.
+
 It should handle at minimum the following event categories:
 
 | Source event type | Intermediate event emitted |
@@ -154,3 +156,4 @@ The following questions are left explicitly open for community discussion.
 11. **Reasoning item lifecycle.** The spec emits `response.output_item.done` for reasoning before reasoning deltas stream (the item is marked done early). Should we replicate this behavior for parity, or wait until reasoning is truly complete? Your input here would be especially valuable.
 12. **`[DONE]` configurability.** Should the `[DONE]` terminal marker be configurable per-request or per-deployment? We would love to hear from the community on this.
 13. **First-chunk await overhead.** Awaiting the first chunk before returning the `StreamingResponse` adds latency to every streaming request. Is this trade-off acceptable?
+14. **GPT-OSS and the internal protocol question.** If ADR-01 Q4 (Tun Jian's proposed vLLM Agentic Protocol) is adopted and the gateway moves below `POST /v1/responses`, the Normalizer would need a GPT-OSS-aware branch to handle Harmony `channel` and `recipient` semantics directly. Should the Normalizer interface be designed now to make that extension point obvious, even if the GPT-OSS branch is not implemented for the MVP?

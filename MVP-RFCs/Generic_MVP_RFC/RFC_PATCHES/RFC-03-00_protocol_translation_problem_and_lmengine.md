@@ -33,6 +33,8 @@ The upstream LLM server produces a raw streaming response format. Clients expect
 
 The gateway would bridge this gap entirely in software, without touching the upstream server.
 
+**Note on GPT-OSS / Harmony models.** GPT-OSS models use the Harmony protocol internally — a completely different message format with explicit `channel` and `recipient` fields per message rather than a single `role/content` pair. Under the proposed D1 decision (gateway calls `POST /v1/responses` on vLLM), vLLM handles all Harmony rendering and parsing internally before the response reaches the gateway. From the gateway's perspective, a GPT-OSS model and a standard model produce identical Responses API output items — the translation problem above applies equally to both, with no GPT-OSS-specific handling required in the gateway. See the [vLLM Architecture Study](../../../vllm_architecture_study.md) for a detailed breakdown of how vLLM implements this.
+
 ### 8.2 HTTP Layer
 
 We propose two routes:
