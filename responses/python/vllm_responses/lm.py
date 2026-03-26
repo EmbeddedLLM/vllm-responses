@@ -188,7 +188,12 @@ class LMEngine:
     ) -> ResponseRunContext:
         # Seed the response from request fields, but do not allow `None` request values
         # to clobber schema-required response defaults (e.g. `tools: []`, `truncation: "disabled"`).
-        response = OpenAIResponsesResponse.model_validate(self._body.model_dump(exclude_none=True))
+        # Seed the public Responses resource from the request using wire-field aliases.
+        # This avoids leaking internal Pydantic field names such as `schema_` into a
+        # model-to-model round trip when the public API field is `schema`.
+        response = OpenAIResponsesResponse.model_validate(
+            self._body.model_dump(mode="python", exclude_none=True, by_alias=True)
+        )
 
         hydrated_body = await self._store.rehydrate_request(request=self._body)
         self._hydrated_body = hydrated_body

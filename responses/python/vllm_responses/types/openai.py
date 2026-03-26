@@ -763,23 +763,6 @@ class OpenAIJsonObjectFormat(BaseModel):
     ] = "json_object"
 
 
-class vLLMTextConfig(BaseModel):
-    format: Annotated[
-        OpenAITextFormat | None,
-        Field(
-            description=(
-                "An object specifying the format that the model must output. "
-                'Configuring `{ "type": "json_schema" }` enables Structured Outputs, '
-                "which ensures the model will match your supplied JSON schema. "
-                'The default format is `{ "type": "text" }` with no additional options. '
-                'Setting to `{ "type": "json_object" }` enables the older JSON mode, '
-                "which ensures the message the model generates is valid JSON. "
-                "Using `json_schema` is preferred for models that support it."
-            ),
-        ),
-    ] = None
-
-
 class OpenAITextConfig(BaseModel):
     format: Annotated[
         OpenAITextFormat | OpenAIJsonSchemaFormat | OpenAIJsonObjectFormat | None,
@@ -1513,7 +1496,7 @@ class vLLMResponsesRequest(BaseModel):
         ),
     ] = 1.0
     text: Annotated[
-        vLLMTextConfig | None,
+        OpenAITextConfig | None,
         Field(
             description=(
                 "Configuration options for a text response from the model. "
@@ -2121,6 +2104,33 @@ class vLLMResponsesRequest(BaseModel):
         }
         return run_settings, builtin_tools, mcp_tool_name_map
 
+    def _as_chat_completion_response_format(self) -> dict[str, Any] | None:
+        text_config = self.text
+        if text_config is None or text_config.format is None:
+            return None
+
+        format_config = text_config.format
+        if isinstance(format_config, OpenAITextFormat):
+            return None
+
+        if isinstance(format_config, OpenAIJsonObjectFormat):
+            return {"type": "json_object"}
+
+        if isinstance(format_config, OpenAIJsonSchemaFormat):
+            json_schema_payload: dict[str, Any] = {
+                "name": format_config.name,
+                "schema": format_config.schema_,
+                "strict": format_config.strict,
+            }
+            if format_config.description is not None:
+                json_schema_payload["description"] = format_config.description
+            return {
+                "type": "json_schema",
+                "json_schema": json_schema_payload,
+            }
+
+        raise BadInputError(f"Unsupported text.format for chat backend: {type(format_config)!r}")
+
     def as_openai_chat_settings(self) -> OpenAIChatModelSettings:
         """
         These parameters are not supported by Responses API:
@@ -2159,6 +2169,7 @@ class vLLMResponsesRequest(BaseModel):
         - metadata
         """
         kwargs: dict[str, Any] = self.model_dump(exclude_unset=True, exclude_none=True)
+        kwargs.pop("text", None)
 
         max_output_tokens = kwargs.pop("max_output_tokens", None)
         if max_output_tokens:
@@ -2172,6 +2183,15 @@ class vLLMResponsesRequest(BaseModel):
             kwargs["openai_top_logprobs"] = top_logprobs
         else:
             kwargs["openai_logprobs"] = False
+
+        response_format = self._as_chat_completion_response_format()
+        if response_format is not None:
+            extra_body = dict(kwargs.pop("extra_body", {}) or {})
+            # Keep plain-text output mode in pydantic_ai while forwarding the upstream chat
+            # `response_format` request directly. Using pydantic_ai native structured output here
+            # would change the event stream into a final-result tool path instead of text content.
+            extra_body["response_format"] = response_format
+            kwargs["extra_body"] = extra_body
 
         return OpenAIChatModelSettings(**kwargs)
 
@@ -2672,10 +2692,10 @@ class _OpenAIStreamEvent(BaseModel):
     ]
 
     def as_responses_chunk(self) -> str:
-        return f"event: {self.type}\ndata: {self.model_dump_json(exclude_none=True)}\n\n"
+        return f"event: {self.type}\ndata: {self.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
     def as_completion_chunk(self) -> str:
-        return f"data: {self.model_dump_json(exclude_none=True)}\n\n"
+        return f"data: {self.model_dump_json(exclude_none=True, by_alias=True)}\n\n"
 
 
 class OpenAIResponsesError(_OpenAIStreamEvent):
@@ -2735,7 +2755,7 @@ class OpenAIResponsesStream(_OpenAIStreamEvent):
         payload = dict(
             type=self.type,
             sequence_number=self.sequence_number,
-            response=self.response.model_dump(mode="python", exclude_none=False),
+            response=self.response.model_dump(mode="python", exclude_none=False, by_alias=True),
         )
         _ensure_code_interpreter_outputs_key(payload)
         return f"event: {self.type}\ndata: {json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}\n\n"
@@ -2763,7 +2783,7 @@ class OpenAIResponsesStreamOutput(_OpenAIStreamEvent):
     ]
 
     def as_responses_chunk(self) -> str:
-        payload = self.model_dump(mode="python", exclude_none=True)
+        payload = self.model_dump(mode="python", exclude_none=True, by_alias=True)
         _ensure_code_interpreter_outputs_key(payload)
         return f"event: {self.type}\ndata: {json.dumps(payload, separators=(',', ':'), ensure_ascii=False)}\n\n"
 
