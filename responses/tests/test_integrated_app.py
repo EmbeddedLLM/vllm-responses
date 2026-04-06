@@ -6,14 +6,19 @@ from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Response
 from fastapi.responses import ORJSONResponse
 from fastapi.routing import APIRoute
 from prometheus_client import CONTENT_TYPE_LATEST, REGISTRY, generate_latest
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from vllm_responses.configs.builders import build_runtime_config_for_integrated
+from vllm_responses.configs.runtime import INTERNAL_UPSTREAM_HEADER_NAME
 from vllm_responses.configs.sources import EnvSource
-from vllm_responses.entrypoints.gateway._app import IntegratedGatewayRoute
+from vllm_responses.entrypoints.gateway._app import (
+    IntegratedGatewayRoute,
+    augment_standalone_gateway_app,
+)
 from vllm_responses.entrypoints.vllm._runtime import _build_integrated_app
 from vllm_responses.routers import serving, upstream_proxy
 from vllm_responses.types.openai import OpenAIResponsesResponse
@@ -50,22 +55,25 @@ def _install_fake_native_responses_router(
 ) -> tuple[ModuleType, list[str]]:
     attach_calls: list[str] = []
     responses_api_router = ModuleType("vllm.entrypoints.openai.responses.api_router")
+    router = APIRouter()
+
+    @router.post("/v1/responses")
+    async def native_responses_create() -> ORJSONResponse:
+        return ORJSONResponse({"native": "create"})
+
+    @router.get("/v1/responses/{response_id}")
+    async def native_responses_get(response_id: str) -> ORJSONResponse:
+        return ORJSONResponse({"native": response_id})
+
+    @router.post("/v1/responses/{response_id}/cancel")
+    async def native_responses_cancel(response_id: str) -> ORJSONResponse:
+        return ORJSONResponse({"cancelled": response_id})
 
     def attach_router(app: FastAPI) -> None:
         attach_calls.append("called")
+        app.include_router(router)
 
-        @app.post("/v1/responses")
-        async def native_responses_create() -> ORJSONResponse:
-            return ORJSONResponse({"native": "create"})
-
-        @app.get("/v1/responses/{response_id}")
-        async def native_responses_get(response_id: str) -> ORJSONResponse:
-            return ORJSONResponse({"native": response_id})
-
-        @app.post("/v1/responses/{response_id}/cancel")
-        async def native_responses_cancel(response_id: str) -> ORJSONResponse:
-            return ORJSONResponse({"cancelled": response_id})
-
+    responses_api_router.router = router
     responses_api_router.attach_router = attach_router
     monkeypatch.setitem(
         sys.modules,
@@ -206,6 +214,35 @@ def test_build_integrated_app_owns_responses_route_family(integrated_app: FastAP
     assert integrated_app.state.vllm_responses.runtime_config.runtime_mode == "integrated"
 
 
+def test_build_integrated_app_mounts_internal_native_responses_routes(
+    integrated_app: FastAPI,
+) -> None:
+    assert (
+        _route_endpoint(
+            integrated_app,
+            method="POST",
+            path="/_vllm_internal/v1/responses",
+        )
+        is not serving.create_model_response
+    )
+    assert (
+        _route_endpoint(
+            integrated_app,
+            method="GET",
+            path="/_vllm_internal/v1/responses/{response_id}",
+        )
+        is not serving.retrieve_model_response
+    )
+    assert (
+        _route_endpoint(
+            integrated_app,
+            method="POST",
+            path="/_vllm_internal/v1/responses/{response_id}/cancel",
+        )
+        is not serving.create_model_response
+    )
+
+
 def test_build_integrated_app_keeps_native_chat_and_models(integrated_app: FastAPI) -> None:
     assert (
         _route_endpoint(
@@ -276,6 +313,22 @@ async def test_integrated_app_previous_response_id_miss_returns_openai_error(
     assert resp.json()["error"]["type"] == "invalid_request_error"
     assert resp.json()["error"]["param"] == "previous_response_id"
     assert resp.json()["error"]["code"] == "previous_response_not_found"
+
+
+@pytest.mark.anyio
+async def test_integrated_internal_native_responses_routes_require_internal_header(
+    integrated_client: httpx.AsyncClient,
+) -> None:
+    blocked = await integrated_client.post("/_vllm_internal/v1/responses", json={})
+    allowed = await integrated_client.post(
+        "/_vllm_internal/v1/responses",
+        headers={INTERNAL_UPSTREAM_HEADER_NAME: "1"},
+        json={},
+    )
+
+    assert blocked.status_code == 404
+    assert allowed.status_code == 200
+    assert allowed.json() == {"native": "create"}
 
 
 @pytest.mark.anyio
@@ -380,3 +433,32 @@ async def test_integrated_metrics_endpoint_exposes_shared_gateway_metrics(
         'vllm_responses_http_requests_total{method="GET",route="/v1/responses/{response_id}",status="404"}'
         in after_scrape.text
     )
+
+
+def test_build_standalone_app_uses_route_wrapper_without_base_http_middleware() -> None:
+    app = FastAPI()
+    augment_standalone_gateway_app(
+        app,
+        include_upstream_proxy=True,
+        include_metrics_route=True,
+        include_cors=True,
+        customize_openapi=False,
+        internal_upstream_header="x-test-upstream",
+    )
+
+    standalone_responses_route = _route_object(
+        app,
+        method="POST",
+        path="/v1/responses",
+    )
+    standalone_models_route = _route_object(
+        app,
+        method="GET",
+        path="/v1/models",
+    )
+
+    assert type(standalone_responses_route).__name__ == "StandaloneGatewayRoute"
+    assert type(standalone_models_route).__name__ == "StandaloneGatewayRoute"
+    assert type(_route_object(serving.router, method="POST", path="/v1/responses")) is APIRoute
+    assert type(_route_object(upstream_proxy.router, method="GET", path="/v1/models")) is APIRoute
+    assert not any(entry.cls is BaseHTTPMiddleware for entry in app.user_middleware)

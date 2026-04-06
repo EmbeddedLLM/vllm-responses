@@ -201,7 +201,6 @@ async def _proxy(
     )
 
 
-@router.get("/v1/models")
 async def proxy_models(request: Request) -> Response:
     return await _proxy(
         request=request,
@@ -211,7 +210,6 @@ async def proxy_models(request: Request) -> Response:
     )
 
 
-@router.post("/v1/chat/completions")
 async def proxy_chat_completions(request: Request) -> Response:
     return await _proxy(
         request=request,
@@ -219,3 +217,19 @@ async def proxy_chat_completions(request: Request) -> Response:
         upstream_path="/chat/completions",
         allow_sse_passthrough=True,
     )
+
+
+def install_routes(router: APIRouter) -> None:
+    router.add_api_route(
+        "/v1/models",
+        proxy_models,
+        methods=["GET"],
+    )
+    router.add_api_route(
+        "/v1/chat/completions",
+        proxy_chat_completions,
+        methods=["POST"],
+    )
+
+
+install_routes(router)

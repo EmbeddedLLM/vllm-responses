@@ -22,6 +22,7 @@ def test_build_runtime_config_for_standalone_reads_env_overrides() -> None:
         env=EnvSource(
             environ={
                 "VR_LLM_API_BASE": "http://127.0.0.1:9000/v1",
+                "VR_UPSTREAM_API_KIND": "responses",
                 "VR_OPENAI_API_KEY": "runtime-key",
                 "VR_WEB_SEARCH_PROFILE": "exa_mcp",
                 "VR_CODE_INTERPRETER_MODE": "external",
@@ -33,6 +34,7 @@ def test_build_runtime_config_for_standalone_reads_env_overrides() -> None:
     )
 
     assert runtime_config.runtime_mode == "standalone"
+    assert runtime_config.upstream_api_kind == "responses"
     assert runtime_config.llm_api_base == "http://127.0.0.1:9000/v1"
     assert runtime_config.openai_api_key == "runtime-key"
     assert runtime_config.web_search_profile == "exa_mcp"
@@ -68,6 +70,7 @@ def test_config_helpers_do_not_bootstrap_builtin_registries(
 
     _ = validate_responses_cli_args(
         raw_values={
+            "upstream_api_kind": None,
             "web_search_profile": None,
             "code_interpreter_mode": "disabled",
             "code_interpreter_port": None,
@@ -101,6 +104,7 @@ def test_build_runtime_config_for_supervisor_ignores_web_search_env_without_cli(
     runtime_config = build_runtime_config_for_supervisor(
         args=Namespace(
             upstream="http://127.0.0.1:8457/v1",
+            upstream_api_kind=None,
             gateway_host=None,
             gateway_port=None,
             gateway_workers=None,
@@ -118,6 +122,7 @@ def test_build_runtime_config_for_supervisor_ignores_web_search_env_without_cli(
     )
 
     assert runtime_config.web_search_profile is None
+    assert runtime_config.upstream_api_kind == "chat_completions"
 
 
 def test_activate_gateway_runtime_attaches_runtime_config() -> None:
@@ -179,6 +184,7 @@ def test_get_openai_provider_uses_integrated_http_client(monkeypatch) -> None:
         env=EnvSource(environ={"VR_OPENAI_API_KEY": "ctx-key"}),
         host="0.0.0.0",
         port=8000,
+        upstream_api_kind="responses",
         web_search_profile="exa_mcp",
         code_interpreter_mode="disabled",
         code_interpreter_port=5970,
@@ -191,7 +197,7 @@ def test_get_openai_provider_uses_integrated_http_client(monkeypatch) -> None:
     _ = get_openai_provider(runtime_config)
 
     assert captured["api_key"] == "ctx-key"
-    assert captured["base_url"] == "http://127.0.0.1:8000/v1"
+    assert captured["base_url"] == "http://127.0.0.1:8000/_vllm_internal/v1"
     assert captured["http_client"] is INTEGRATED_LM_CLIENT
 
 
@@ -210,6 +216,26 @@ def test_build_runtime_config_for_integrated_ignores_web_search_env_without_cli(
     )
 
     assert runtime_config.web_search_profile is None
+    assert runtime_config.upstream_api_kind == "chat_completions"
+
+
+def test_build_runtime_config_for_integrated_accepts_responses_backend() -> None:
+    runtime_config = build_runtime_config_for_integrated(
+        env=EnvSource(environ={}),
+        host="127.0.0.1",
+        port=8000,
+        upstream_api_kind="responses",
+        web_search_profile=None,
+        code_interpreter_mode="disabled",
+        code_interpreter_port=5970,
+        code_interpreter_workers=0,
+        code_interpreter_startup_timeout_s=30.0,
+        mcp_config_path=None,
+        mcp_builtin_runtime_url=None,
+    )
+
+    assert runtime_config.upstream_api_kind == "responses"
+    assert runtime_config.llm_api_base == "http://127.0.0.1:8000/_vllm_internal/v1"
 
 
 def test_get_openai_provider_defaults_to_standalone_client(monkeypatch) -> None:

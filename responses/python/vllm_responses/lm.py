@@ -10,7 +10,7 @@ from pydantic_ai import (
     UnexpectedModelBehavior,
     capture_run_messages,
 )
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.retries import RetryConfig
 
@@ -38,7 +38,10 @@ from vllm_responses.tools.runtime import ToolRuntimeContext, bind_tool_runtime_c
 from vllm_responses.tools.web_search.runtime import build_web_search_tool_runtime
 from vllm_responses.types.openai import (
     AgentRunSettings,
+    OpenAIFunctionToolChoice,
+    OpenAIFunctionToolOutput,
     OpenAIResponsesError,
+    OpenAIResponsesFunctionTool,
     OpenAIResponsesResponse,
     OpenAIResponsesResponseError,
     OpenAIResponsesStream,
@@ -57,6 +60,7 @@ INTEGRATED_LM_CLIENT.headers[INTERNAL_UPSTREAM_HEADER_NAME] = "1"
 
 @dataclass(slots=True)
 class ResponseRunContext:
+    agent: Agent
     response: OpenAIResponsesResponse
     hydrated_request: vLLMResponsesRequest
     run_settings: AgentRunSettings
@@ -82,7 +86,7 @@ def get_openai_provider(
 
 
 class LMEngine:
-    """Orchestrate one Responses request using vLLM Chat Completions via Pydantic AI.
+    """Orchestrate one Responses request via Pydantic AI.
 
     MVP staging notes:
     - keep the alpha tool execution model (Option A: code interpreter executed via `pydantic_ai` tool registration)
@@ -104,16 +108,8 @@ class LMEngine:
         self._builtin_mcp_runtime_client = builtin_mcp_runtime_client
         self._runtime_config = runtime_config
         self._hydrated_body: vLLMResponsesRequest | None = None
-        # NOTE: the installed `pydantic_ai` version in this repo does not accept `retry_config`
-        # on `OpenAIProvider.__init__`. Keep the parameter for future use, but do not pass it.
-        self._agent = Agent(
-            OpenAIChatModel(
-                model_name=body.model,
-                provider=get_openai_provider(runtime_config),
-            ),
-            model_settings=body.as_openai_chat_settings(),
-        )
         self._response: OpenAIResponsesResponse | None = None
+        _ = retry_config
 
     async def run(
         self,
@@ -197,6 +193,7 @@ class LMEngine:
 
         hydrated_body = await self._store.rehydrate_request(request=self._body)
         self._hydrated_body = hydrated_body
+        agent = self._build_agent(hydrated_body)
         run_settings, builtin_tools, mcp_tool_name_map = await hydrated_body.as_run_settings(
             builtin_mcp_runtime_client=self._builtin_mcp_runtime_client,
             request_remote_enabled=self._runtime_config.mcp_request_remote_enabled,
@@ -213,14 +210,41 @@ class LMEngine:
             ),
         )
 
+        function_tool_names = {
+            tool.name
+            for tool in (hydrated_body.tools or ())
+            if isinstance(tool, OpenAIResponsesFunctionTool)
+        }
+        named_function_tool_choice = None
+        if isinstance(hydrated_body.tool_choice, OpenAIFunctionToolChoice):
+            named_function_tool_choice = hydrated_body.tool_choice.name
+
+        input_items = hydrated_body.input if isinstance(hydrated_body.input, list) else []
+        text_tool_call_recovery_requested = hydrated_body.tool_choice == "required" or isinstance(
+            hydrated_body.tool_choice, OpenAIFunctionToolChoice
+        )
+        probe_text_tool_calls = (
+            # Live non-Harmony upstream Responses still surface some forced function-tool choices
+            # (`required` / named function) back through `pydantic_ai` as plain text instead of
+            # structured ToolCallPart events. Keep the recovery path narrow to those cases and
+            # only on the first tool-request turn.
+            self._runtime_config.upstream_api_kind == "responses"
+            and bool(function_tool_names)
+            and text_tool_call_recovery_requested
+            and not any(isinstance(item, OpenAIFunctionToolOutput) for item in input_items)
+        )
+
         normalizer = PydanticAINormalizer(
             builtin_tool_names=builtin_tool_names,
             code_interpreter_tool_name=CODE_INTERPRETER_TOOL,
             mcp_tool_name_map=mcp_tool_name_map,
+            text_tool_call_probe_names=function_tool_names if probe_text_tool_calls else set(),
+            named_function_tool_choice=named_function_tool_choice,
         )
         include_set = set(hydrated_body.include or [])
         composer = ResponseComposer(response=response, include=include_set)
         return ResponseRunContext(
+            agent=agent,
             response=response,
             hydrated_request=hydrated_body,
             run_settings=run_settings,
@@ -228,6 +252,26 @@ class LMEngine:
             tool_runtime_context=tool_runtime_context,
             normalizer=normalizer,
             composer=composer,
+        )
+
+    def _build_agent(self, body: vLLMResponsesRequest) -> Agent:
+        # Build the model from the hydrated request so inherited tool policy from
+        # `previous_response_id` is reflected consistently in backend-specific settings.
+        provider = get_openai_provider(self._runtime_config)
+        if self._runtime_config.upstream_api_kind == "responses":
+            return Agent(
+                OpenAIResponsesModel(
+                    model_name=body.model,
+                    provider=provider,
+                ),
+                model_settings=body.as_openai_responses_settings(),
+            )
+        return Agent(
+            OpenAIChatModel(
+                model_name=body.model,
+                provider=provider,
+            ),
+            model_settings=body.as_openai_chat_settings(),
         )
 
     async def _iter_responses_events_non_stream(
@@ -251,8 +295,8 @@ class LMEngine:
         with capture_run_messages() as messages:
             try:
                 with bind_tool_runtime_context(run_context.tool_runtime_context):
-                    async for event in self._agent.run_stream_events(
-                        output_type=[self._agent.output_type, DeferredToolRequests],
+                    async for event in run_context.agent.run_stream_events(
+                        output_type=[run_context.agent.output_type, DeferredToolRequests],
                         message_history=run_context.run_settings["message_history"],
                         instructions=run_context.run_settings["instructions"],
                         toolsets=run_context.run_settings["toolsets"],
@@ -301,8 +345,8 @@ class LMEngine:
         with capture_run_messages() as messages:
             try:
                 with bind_tool_runtime_context(run_context.tool_runtime_context):
-                    async for event in self._agent.run_stream_events(
-                        output_type=[self._agent.output_type, DeferredToolRequests],
+                    async for event in run_context.agent.run_stream_events(
+                        output_type=[run_context.agent.output_type, DeferredToolRequests],
                         message_history=run_context.run_settings["message_history"],
                         instructions=run_context.run_settings["instructions"],
                         toolsets=run_context.run_settings["toolsets"],

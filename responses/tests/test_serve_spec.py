@@ -11,6 +11,7 @@ from vllm_responses.configs.builders import (
 )
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints._helper_runtime import SpawnCodeInterpreterSpec
+from vllm_responses.entrypoints._serve._runtime import _build_gateway_worker_env
 from vllm_responses.entrypoints._serve._spec import (
     ExternalCodeInterpreterSpec,
     ExternalUpstreamSpec,
@@ -22,6 +23,7 @@ from vllm_responses.entrypoints._serve._spec import (
 def _base_args(**overrides) -> argparse.Namespace:
     data = dict(
         upstream=None,
+        upstream_api_kind=None,
         gateway_host=None,
         gateway_port=None,
         gateway_workers=None,
@@ -53,6 +55,34 @@ def test_build_runtime_config_for_supervisor_prefers_cli_upstream() -> None:
         env=EnvSource(environ={"VR_LLM_API_BASE": "http://example.invalid:9999"}),
     )
     assert runtime_config.llm_api_base == "http://127.0.0.1:8457"
+    assert runtime_config.upstream_api_kind == "chat_completions"
+
+
+def test_build_runtime_config_for_supervisor_accepts_upstream_api_kind() -> None:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            upstream_api_kind="responses",
+        ),
+        env=EnvSource(environ={}),
+    )
+    assert runtime_config.upstream_api_kind == "responses"
+
+
+def test_build_gateway_worker_env_propagates_upstream_api_kind() -> None:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            upstream_api_kind="responses",
+            code_interpreter="disabled",
+        ),
+        env=EnvSource(environ={}),
+    )
+    spec = build_serve_spec(runtime_config)
+
+    worker_env = _build_gateway_worker_env(spec=spec, prometheus_multiproc_dir=None)
+
+    assert worker_env["VR_UPSTREAM_API_KIND"] == "responses"
 
 
 def test_build_runtime_config_for_supervisor_ignores_env_upstream_without_cli() -> None:

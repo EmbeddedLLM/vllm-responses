@@ -1,0 +1,101 @@
+filename: 2026-03-30-019d3cc9-d93e-7230-8fc8-3dc5839d71a8
+request:
+  body:
+    input: "Say exactly: hello"
+    model: Qwen/Qwen3.5-35B-A3B
+    store: false
+    stream: false
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "90"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: qwen35a3b-responses-text-nonstream.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cc9-d93e-7230-8fc8-3dc5839d71a8
+response:
+  body:
+    background: false
+    created_at: 1774841354
+    id: resp_9ac9501a85e49a09
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 262130
+    max_tool_calls: null
+    metadata: null
+    model: Qwen/Qwen3.5-35B-A3B
+    object: response
+    output:
+      - content:
+          - text: 'Thinking Process:
+
+
+              1.  **Analyze the Request:** The user is asking me to say exactly "hello".
+
+              2.  **Identify the Constraint:** The instruction is "Say exactly: hello". This means I should not add any punctuation (unless it''s part of the word, which it isn''t), no extra text, no explanations, just the word itself.
+
+              3.  **Formulate the Output:** The output should be the string "hello".
+
+              4.  **Final Check:** Does this meet the safety guidelines? Yes. Does it meet the user''s instruction? Yes.
+
+
+              Output: hello
+
+              '
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_a3d02a2af89ae6b6
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+          - annotations: []
+            logprobs: null
+            text: "
+
+
+              hello"
+            type: output_text
+        id: msg_9fd1a14140c08420
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text: null
+    tool_choice: auto
+    tools: []
+    top_logprobs: null
+    top_p: 0.95
+    truncation: disabled
+    usage:
+      input_tokens: 14
+      input_tokens_details:
+        cached_tokens: 0
+        cached_tokens_per_turn: []
+        input_tokens_per_turn: []
+      output_tokens: 132
+      output_tokens_details:
+        output_tokens_per_turn: []
+        reasoning_tokens: 0
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn: []
+      total_tokens: 146
+    user: null
+  headers:
+    content-length: "1702"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T03:29:14.558857+00:00"

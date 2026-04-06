@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from importlib import import_module
 from typing import Any, Protocol
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 
 
 class VllmApiServerModule(Protocol):
@@ -60,6 +60,24 @@ def load_responses_attach_router() -> Callable[[FastAPI], None]:
             "`vllm.entrypoints.openai.responses.api_router.attach_router`."
         )
     return attach_router
+
+
+def load_responses_router() -> APIRouter:
+    try:
+        responses_api_router = import_module("vllm.entrypoints.openai.responses.api_router")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "Integrated mode requires the vLLM OpenAI Responses router seam at "
+            "`vllm.entrypoints.openai.responses.api_router.router`."
+        ) from exc
+
+    router = getattr(responses_api_router, "router", None)
+    if not isinstance(router, APIRouter):
+        raise RuntimeError(
+            "Integrated mode requires an APIRouter at "
+            "`vllm.entrypoints.openai.responses.api_router.router`."
+        )
+    return router
 
 
 @contextmanager

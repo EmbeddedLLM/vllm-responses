@@ -20,6 +20,7 @@ Notes:
 
 - Supported entrypoints use CLI flags for upstream selection, bind address, worker count, and helper wiring.
 - Integrated mode (`vllm serve --responses`) uses native vLLM `--host` / `--port` and requires a single API server.
+- Integrated mode transport selection is CLI-owned via `--responses-upstream-api-kind {chat_completions,responses}` and defaults to `chat_completions`.
 - `VR_MAX_CONCURRENCY` applies to direct standalone startup paths used mainly for development/tests.
 
 ## Storage Configuration

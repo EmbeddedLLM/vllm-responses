@@ -1,0 +1,90 @@
+filename: 2026-03-30-019d3e78-3e2f-7d23-aca4-e576ecf2130f
+request:
+  body:
+    input:
+      - content: hello
+        role: user
+    model: openai/gpt-oss-20b
+    store: false
+    stream: false
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "103"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: gptoss20b-responses-text-nonstream.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3e78-3e2f-7d23-aca4-e576ecf2130f
+response:
+  body:
+    background: false
+    created_at: 1774869560
+    id: resp_81d5882cb2e96af5
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 131004
+    max_tool_calls: null
+    metadata: null
+    model: openai/gpt-oss-20b
+    object: response
+    output:
+      - content:
+          - text: The user says "hello". They are greeting. I should respond politely. Probably just a friendly greeting. Since no further instructions, just respond in friendly tone.
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_9f773c2f1c4036c7
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+          - annotations: []
+            logprobs: null
+            text: Hello! 👋 How can I help you today?
+            type: output_text
+        id: msg_9bc9ad519c0f6693
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text: null
+    tool_choice: auto
+    tools: []
+    top_logprobs: null
+    top_p: 1.0
+    truncation: disabled
+    usage:
+      input_tokens: 68
+      input_tokens_details:
+        cached_tokens: 64
+        cached_tokens_per_turn:
+          - 64
+        input_tokens_per_turn:
+          - 68
+      output_tokens: 53
+      output_tokens_details:
+        output_tokens_per_turn:
+          - 53
+        reasoning_tokens: 33
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn:
+          - 0
+      total_tokens: 121
+    user: null
+  headers:
+    content-length: "1382"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T11:19:20.879357+00:00"

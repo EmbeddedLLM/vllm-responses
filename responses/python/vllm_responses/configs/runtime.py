@@ -5,13 +5,16 @@ from typing import Literal
 
 RuntimeMode = Literal["standalone", "supervisor", "integrated", "mock_llm"]
 CodeInterpreterMode = Literal["spawn", "external", "disabled"]
+UpstreamAPIKind = Literal["chat_completions", "responses"]
 
 INTERNAL_UPSTREAM_HEADER_NAME = "x-vr-internal-upstream"
+INTEGRATED_INTERNAL_ROUTE_PREFIX = "/_vllm_internal"
 
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
     runtime_mode: RuntimeMode
+    upstream_api_kind: UpstreamAPIKind
 
     gateway_host: str
     gateway_port: int

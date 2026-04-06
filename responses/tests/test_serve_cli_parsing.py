@@ -14,6 +14,8 @@ def test_serve_parser_accepts_remote_upstream_flags() -> None:
             "8458",
             "--upstream",
             "http://127.0.0.1:8000/v1",
+            "--upstream-api-kind",
+            "responses",
             "--web-search-profile",
             "exa_mcp",
             "--code-interpreter-startup-timeout",
@@ -31,6 +33,7 @@ def test_serve_parser_accepts_remote_upstream_flags() -> None:
     assert ns.command == "serve"
     assert ns.gateway_port == 8458
     assert ns.upstream == "http://127.0.0.1:8000/v1"
+    assert ns.upstream_api_kind == "responses"
     assert ns.web_search_profile == "exa_mcp"
     assert ns.code_interpreter_startup_timeout == "12.5"
     assert ns.upstream_ready_timeout == "90"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -61,6 +62,12 @@ from vllm_responses.tools.web_search.types import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedTextToolCall:
+    name: str
+    arguments_json: str
+
+
 class PydanticAINormalizer:
     """Convert `pydantic_ai` stream events into internal NormalizedEvents.
 
@@ -75,15 +82,21 @@ class PydanticAINormalizer:
         builtin_tool_names: set[str],
         code_interpreter_tool_name: str,
         mcp_tool_name_map: dict[str, McpToolRef] | None = None,
+        text_tool_call_probe_names: set[str] | None = None,
+        named_function_tool_choice: str | None = None,
     ) -> None:
         self._builtin_tool_names = builtin_tool_names
         self._code_interpreter_tool_name = code_interpreter_tool_name
         self._mcp_tool_name_map = mcp_tool_name_map or {}
+        self._text_tool_call_probe_names = text_tool_call_probe_names or set()
+        self._named_function_tool_choice = named_function_tool_choice
 
         self._index_to_item_key: dict[int, str] = {}
         self._tool_call_id_to_item_key: dict[str, str] = {}
         self._item_kind: dict[str, str] = {}
         self._code_arg_extractors: dict[str, _CodeJsonArgsExtractor] = {}
+        self._reasoning_raw_content: dict[str, list[str]] = {}
+        self._text_part_buffers: dict[str, list[str]] = {}
 
     def on_event(self, event) -> Iterable[NormalizedEvent]:
         if isinstance(event, PartStartEvent):
@@ -106,6 +119,10 @@ class PydanticAINormalizer:
         self._index_to_item_key[event.index] = item_key
 
         if isinstance(part, TextPart):
+            if self._text_tool_call_probe_names:
+                self._item_kind[item_key] = "text_tool_call_probe"
+                self._text_part_buffers[item_key] = [part.content] if part.content else []
+                return
             self._item_kind[item_key] = "message"
             yield MessageStarted(item_key=item_key)
             if part.content:
@@ -115,8 +132,14 @@ class PydanticAINormalizer:
         if isinstance(part, ThinkingPart):
             self._item_kind[item_key] = "reasoning"
             yield ReasoningStarted(item_key=item_key)
-            if part.content:
-                yield ReasoningDelta(item_key=item_key, delta=part.content)
+            raw_reasoning = _extract_raw_reasoning_content(part.provider_details)
+            if raw_reasoning is not None:
+                self._reasoning_raw_content[item_key] = raw_reasoning
+                text = "".join(raw_reasoning)
+            else:
+                text = part.content
+            if text:
+                yield ReasoningDelta(item_key=item_key, delta=text)
             return
 
         if isinstance(part, ToolCallPart):
@@ -177,11 +200,31 @@ class PydanticAINormalizer:
 
         delta = event.delta
         if isinstance(delta, TextPartDelta):
+            if self._item_kind.get(item_key) == "text_tool_call_probe":
+                if delta.content_delta:
+                    self._text_part_buffers.setdefault(item_key, []).append(delta.content_delta)
+                return
             if delta.content_delta:
                 yield MessageDelta(item_key=item_key, delta=delta.content_delta)
             return
 
         if isinstance(delta, ThinkingPartDelta):
+            # `pydantic_ai` may carry upstream-native reasoning in provider-specific
+            # metadata instead of `content_delta`. That metadata can arrive either as
+            # a dict merge or as a callable patch over prior provider details, so we
+            # reconstruct the updated raw reasoning state before emitting deltas.
+            raw_reasoning = _apply_reasoning_provider_details_delta(
+                existing=self._reasoning_raw_content.get(item_key),
+                provider_details_delta=delta.provider_details,
+            )
+            if raw_reasoning is not None:
+                previous = self._reasoning_raw_content.get(item_key, [])
+                self._reasoning_raw_content[item_key] = raw_reasoning
+                raw_delta = _diff_raw_reasoning_text(previous, raw_reasoning)
+                if raw_delta:
+                    yield ReasoningDelta(item_key=item_key, delta=raw_delta)
+                return
+
             if delta.content_delta:
                 yield ReasoningDelta(item_key=item_key, delta=delta.content_delta)
             return
@@ -234,11 +277,44 @@ class PydanticAINormalizer:
         item_key = self._index_to_item_key.get(event.index, f"part:{event.index}")
 
         if isinstance(part, TextPart):
+            if self._item_kind.get(item_key) == "text_tool_call_probe":
+                buffered = self._text_part_buffers.pop(item_key, [])
+                text = "".join(buffered) if buffered else part.content
+                parsed = _parse_text_tool_call(
+                    text=text,
+                    allowed_tool_names=self._text_tool_call_probe_names,
+                    named_tool_choice=self._named_function_tool_choice,
+                )
+                if parsed is None:
+                    self._item_kind[item_key] = "message"
+                    yield MessageStarted(item_key=item_key)
+                    if text:
+                        yield MessageDelta(item_key=item_key, delta=text)
+                    yield MessageDone(item_key=item_key, text=text)
+                    return
+
+                call_id = f"call_{item_key.replace(':', '_')}"
+                self._item_kind[item_key] = "function_call"
+                self._tool_call_id_to_item_key[call_id] = item_key
+                record_tool_call_requested("function")
+                yield FunctionCallStarted(
+                    item_key=item_key,
+                    call_id=call_id,
+                    name=parsed.name,
+                    initial_arguments_json="",
+                )
+                yield FunctionCallDone(
+                    item_key=item_key,
+                    arguments_json=parsed.arguments_json,
+                )
+                return
             yield MessageDone(item_key=item_key, text=part.content)
             return
 
         if isinstance(part, ThinkingPart):
-            yield ReasoningDone(item_key=item_key, text=part.content)
+            raw_reasoning = self._reasoning_raw_content.pop(item_key, None)
+            text = "".join(raw_reasoning) if raw_reasoning is not None else part.content
+            yield ReasoningDone(item_key=item_key, text=text)
             return
 
         if isinstance(part, ToolCallPart):
@@ -413,6 +489,120 @@ def _json_dumps(value: dict[str, Any]) -> str:
     import json
 
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _extract_raw_reasoning_content(provider_details: Any) -> list[str] | None:
+    if not isinstance(provider_details, dict):
+        return None
+    raw_content = provider_details.get("raw_content")
+    if not isinstance(raw_content, list):
+        return None
+    values: list[str] = []
+    for item in raw_content:
+        if not isinstance(item, str):
+            return None
+        values.append(item)
+    return values
+
+
+def _apply_reasoning_provider_details_delta(
+    *,
+    existing: list[str] | None,
+    provider_details_delta: Any,
+) -> list[str] | None:
+    if provider_details_delta is None:
+        return None
+
+    # `pydantic_ai` models provider-details deltas as either:
+    # - a plain dict to merge into the existing details, or
+    # - a callable patch that receives the current details and returns the updated
+    #   details.
+    #
+    # We normalize both forms onto the `raw_content` shape we keep for reasoning
+    # continuity, so downstream `ReasoningDelta`/`ReasoningDone` can prefer the full
+    # raw upstream reasoning stream over fallback summary/content fields.
+    existing_details = None if existing is None else {"raw_content": list(existing)}
+    if callable(provider_details_delta):
+        updated_details = provider_details_delta(existing_details)
+    elif isinstance(provider_details_delta, dict):
+        updated_details = {**(existing_details or {}), **provider_details_delta}
+    else:
+        return None
+
+    updated_raw = _extract_raw_reasoning_content(updated_details)
+    if updated_raw is None:
+        return existing
+    return updated_raw
+
+
+def _diff_raw_reasoning_text(previous: list[str], current: list[str]) -> str:
+    deltas: list[str] = []
+    for index, current_chunk in enumerate(current):
+        previous_chunk = previous[index] if index < len(previous) else ""
+        if current_chunk.startswith(previous_chunk):
+            deltas.append(current_chunk[len(previous_chunk) :])
+        elif current_chunk != previous_chunk:
+            deltas.append(current_chunk)
+    return "".join(deltas)
+
+
+def _parse_text_tool_call(
+    *,
+    text: str,
+    allowed_tool_names: set[str],
+    named_tool_choice: str | None,
+) -> _ParsedTextToolCall | None:
+    # Some upstream native Responses paths arrive through `pydantic_ai` as plain
+    # text even though the model is semantically returning a function call. We only
+    # probe that text in the narrow function-tool cases selected by the caller.
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    if parsed := _parse_tool_call_json(
+        text=stripped,
+        allowed_tool_names=allowed_tool_names,
+        named_tool_choice=named_tool_choice,
+    ):
+        return parsed
+
+    return None
+
+
+def _parse_tool_call_json(
+    *,
+    text: str,
+    allowed_tool_names: set[str],
+    named_tool_choice: str | None,
+) -> _ParsedTextToolCall | None:
+    # Live non-Harmony upstream Responses currently emit forced function calls as JSON
+    # text. Named-tool choice can be arguments-only JSON, so the caller passes the
+    # forced tool name separately.
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(payload, list) and len(payload) == 1 and isinstance(payload[0], dict):
+        payload = payload[0]
+
+    if isinstance(payload, dict) and {"name", "parameters"} <= payload.keys():
+        name = payload.get("name")
+        parameters = payload.get("parameters")
+        if isinstance(name, str) and name in allowed_tool_names and isinstance(parameters, dict):
+            return _ParsedTextToolCall(
+                name=name,
+                arguments_json=_json_dumps(parameters),
+            )
+        return None
+
+    if named_tool_choice is not None and isinstance(payload, dict):
+        return _ParsedTextToolCall(
+            name=named_tool_choice,
+            arguments_json=_json_dumps(payload),
+        )
+
+    return None
 
 
 def _parse_code_interpreter_tool_output(

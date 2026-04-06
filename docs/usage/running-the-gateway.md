@@ -30,6 +30,19 @@ Use `vllm-responses serve` when the upstream model server is already managed els
 vllm-responses serve --upstream http://127.0.0.1:8000/v1
 ```
 
+By default this mode uses upstream Chat Completions transport. To target an upstream native
+Responses endpoint instead, add:
+
+```bash
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --upstream-api-kind responses
+```
+
+This changes only the gateway-to-upstream transport. The public gateway contract stays the same:
+`POST /v1/responses`, local `previous_response_id`, local retrieval, local `store`, local
+`include`, and gateway-owned tool/MCP behavior.
+
 ### 2. Integrated Colocated Mode
 
 Use `vllm serve --responses` for the single-command local vLLM + gateway experience. This is ideal for:
@@ -41,6 +54,19 @@ Use `vllm serve --responses` for the single-command local vLLM + gateway experie
 ```bash
 vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 ```
+
+By default this mode also uses upstream Chat Completions transport. To target integrated native
+Responses transport instead, add:
+
+```bash
+vllm serve meta-llama/Llama-3.2-3B-Instruct \
+  --responses \
+  --responses-upstream-api-kind responses
+```
+
+This changes only the gateway-to-upstream transport. The public contract stays the same:
+`POST /v1/responses`, `GET /v1/responses/{response_id}`, local `previous_response_id`, local
+retrieval, local `store`, local `include`, and gateway-owned tool/MCP behavior.
 
 ______________________________________________________________________
 
@@ -54,6 +80,7 @@ For `vllm-responses serve`, the gateway-owned CLI surface is:
 | CLI Flag                             | Description                           |
 | ------------------------------------ | ------------------------------------- |
 | `--upstream`                         | Exact upstream API base URL           |
+| `--upstream-api-kind`                | Upstream transport family             |
 | `--upstream-ready-timeout`           | Upstream readiness timeout            |
 | `--upstream-ready-interval`          | Upstream readiness polling interval   |
 | `--gateway-host`                     | Bind host                             |
@@ -78,6 +105,7 @@ environment appends the operator key to the default Exa MCP URL automatically.
 For `vllm serve --responses`, bind/public port are owned by native vLLM flags such as `--host` and `--port`.
 Gateway-owned helper/runtime flags use the namespaced `--responses-*` family, for example:
 
+- `--responses-upstream-api-kind`
 - `--responses-code-interpreter`
 - `--responses-code-interpreter-port`
 - `--responses-code-interpreter-workers`
@@ -85,6 +113,11 @@ Gateway-owned helper/runtime flags use the namespaced `--responses-*` family, fo
 - `--responses-web-search-profile`
 - `--responses-mcp-config`
 - `--responses-mcp-port`
+
+Integrated mode defaults to `chat_completions`. If you set
+`--responses-upstream-api-kind responses`, the gateway uses a guarded internal native Responses
+path instead of the `/v1/chat/completions` loopback transport. Public Responses ownership remains
+unchanged in either case.
 
 See [Configuration Reference](../reference/configuration.md) for env-only deployment settings.
 

@@ -1,0 +1,40 @@
+filename: 2026-03-30-019d3cc9-ebc1-75c3-bf70-a07fb3f1c469
+request:
+  body:
+    input:
+      - arguments: '{"city": "Boston"}'
+        call_id: chatcmpl-tool-880f41c6876eb36f
+        id: fc_a4ec8e35f0416e8a
+        name: get_weather
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-880f41c6876eb36f
+        output: The weather in Boston is sunny, 72F.
+        type: function_call_output
+    model: Qwen/Qwen3.5-35B-A3B
+    store: false
+    stream: false
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "368"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: qwen35a3b-responses-followup-tool-result-only-400.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cc9-ebc1-75c3-bf70-a07fb3f1c469
+response:
+  body:
+    error:
+      code: 400
+      message: No user query found in messages.
+      param: null
+      type: BadRequestError
+  headers:
+    content-length: "105"
+    content-type: application/json
+  status_code: 400
+timestamp: "2026-03-30T03:29:19.297284+00:00"

@@ -27,7 +27,6 @@ from vllm_responses.observability.metrics import (
     finish_gateway_http_request,
     get_route_label,
     install_prometheus_metrics_endpoint,
-    install_prometheus_metrics_middleware,
 )
 from vllm_responses.responses_core.store import configure_response_store
 from vllm_responses.routers import mcp, serving, upstream_proxy
@@ -160,22 +159,27 @@ def _apply_gateway_openapi_customizations(app: FastAPI) -> None:
     app.openapi = _custom_openapi
 
 
-class IntegratedGatewayRoute(APIRoute):
+class _GatewayRouteBase(APIRoute):
+    internal_upstream_header: str | None = None
+    overhead_log_routes: frozenset[str] = frozenset()
+    record_gateway_metrics: bool = True
+
     def get_route_handler(self):  # type: ignore[override]
         route_handler = super().get_route_handler()
-        overhead_log_routes = {self.path}
+        overhead_log_routes = set(self.overhead_log_routes)
+        overhead_log_routes.add(self.path)
 
-        async def integrated_route_handler(request: Request) -> Response:
+        async def wrapped_route_handler(request: Request) -> Response:
             request_id, request_id_token = _install_request_state(request)
             is_internal_upstream = _is_internal_upstream_request(
                 request,
-                internal_upstream_header=INTERNAL_UPSTREAM_HEADER_NAME,
+                internal_upstream_header=self.internal_upstream_header,
             )
             metrics_start_time = None
             status_code = 500
             log_response = True
             try:
-                if not is_internal_upstream:
+                if self.record_gateway_metrics and not is_internal_upstream:
                     metrics_start_time = begin_gateway_http_request()
                 if not is_internal_upstream and request.method in _LOGGED_REQUEST_METHODS:
                     logger.info(make_request_log_str(request))
@@ -196,7 +200,7 @@ class IntegratedGatewayRoute(APIRoute):
                 )
                 return response
             finally:
-                if not is_internal_upstream:
+                if self.record_gateway_metrics and not is_internal_upstream:
                     finish_gateway_http_request(
                         request=request,
                         status_code=status_code,
@@ -204,7 +208,29 @@ class IntegratedGatewayRoute(APIRoute):
                     )
                 CURRENT_REQUEST_ID.reset(request_id_token)
 
-        return integrated_route_handler
+        return wrapped_route_handler
+
+
+class IntegratedGatewayRoute(_GatewayRouteBase):
+    internal_upstream_header = INTERNAL_UPSTREAM_HEADER_NAME
+
+
+def build_standalone_gateway_route_class(
+    *,
+    include_upstream_proxy: bool,
+    internal_upstream_header: str | None = None,
+) -> type[APIRoute]:
+    overhead_log_routes = frozenset(
+        _overhead_log_routes(include_upstream_proxy=include_upstream_proxy)
+    )
+
+    class StandaloneGatewayRoute(_GatewayRouteBase):
+        pass
+
+    StandaloneGatewayRoute.__name__ = "StandaloneGatewayRoute"
+    StandaloneGatewayRoute.internal_upstream_header = internal_upstream_header
+    StandaloneGatewayRoute.overhead_log_routes = overhead_log_routes
+    return StandaloneGatewayRoute
 
 
 def _overhead_log_routes(*, include_upstream_proxy: bool) -> set[str]:
@@ -212,37 +238,6 @@ def _overhead_log_routes(*, include_upstream_proxy: bool) -> set[str]:
     if include_upstream_proxy:
         routes.update(route.path for route in upstream_proxy.router.routes)
     return routes
-
-
-def install_standalone_gateway_request_middleware(
-    app: FastAPI,
-    *,
-    include_upstream_proxy: bool,
-    internal_upstream_header: str | None = None,
-) -> None:
-    overhead_log_routes = _overhead_log_routes(include_upstream_proxy=include_upstream_proxy)
-
-    @app.middleware("http")
-    async def log_request(request: Request, call_next):
-        request_id, request_id_token = _install_request_state(request)
-        is_internal_upstream = _is_internal_upstream_request(
-            request,
-            internal_upstream_header=internal_upstream_header,
-        )
-        try:
-            if not is_internal_upstream and request.method in _LOGGED_REQUEST_METHODS:
-                logger.info(make_request_log_str(request))
-            response: Response = await call_next(request)
-            _finalize_gateway_response(
-                request,
-                response,
-                request_id=request_id,
-                is_internal_upstream=is_internal_upstream,
-                overhead_log_routes=overhead_log_routes,
-            )
-            return response
-        finally:
-            CURRENT_REQUEST_ID.reset(request_id_token)
 
 
 def augment_standalone_gateway_app(
@@ -258,22 +253,24 @@ def augment_standalone_gateway_app(
     ensure_gateway_metrics_registered()
     if include_metrics_route:
         install_prometheus_metrics_endpoint(app)
-    install_prometheus_metrics_middleware(
-        app,
-        internal_upstream_header=internal_upstream_header,
-    )
-    app.include_router(serving.router, tags=["Serving"])
-    if include_upstream_proxy:
-        app.include_router(upstream_proxy.router, tags=["Upstream Proxy"])
-    app.include_router(mcp.router, tags=["MCP"])
-    app.add_exception_handler(VRException, exception_handler)
-    app.add_exception_handler(Exception, exception_handler)
-    app.add_exception_handler(404, path_not_found_handler)
-    install_standalone_gateway_request_middleware(
-        app,
+
+    route_class = build_standalone_gateway_route_class(
         include_upstream_proxy=include_upstream_proxy,
         internal_upstream_header=internal_upstream_header,
     )
+    serving_router = APIRouter(route_class=route_class)
+    serving.install_routes(serving_router)
+    app.include_router(serving_router, tags=["Serving"])
+    if include_upstream_proxy:
+        upstream_proxy_router = APIRouter(route_class=route_class)
+        upstream_proxy.install_routes(upstream_proxy_router)
+        app.include_router(upstream_proxy_router, tags=["Upstream Proxy"])
+    mcp_router = APIRouter(route_class=route_class)
+    mcp.install_routes(mcp_router)
+    app.include_router(mcp_router, tags=["MCP"])
+    app.add_exception_handler(VRException, exception_handler)
+    app.add_exception_handler(Exception, exception_handler)
+    app.add_exception_handler(404, path_not_found_handler)
     if include_cors:
         app.add_middleware(
             CORSMiddleware,

@@ -8,7 +8,7 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, ValidationError, ValidationInfo, field_validator
 
 from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
-from vllm_responses.configs.runtime import CodeInterpreterMode
+from vllm_responses.configs.runtime import CodeInterpreterMode, UpstreamAPIKind
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
 from vllm_responses.tools.profile_resolution import (
     profiled_builtin_requires_mcp,
@@ -44,6 +44,17 @@ class ResponsesCliFlagSpec:
 
 
 RESPONSES_CLI_FLAG_SPECS = (
+    ResponsesCliFlagSpec(
+        field_name="upstream_api_kind",
+        supervisor_flag="--upstream-api-kind",
+        supervisor_dest="upstream_api_kind",
+        integrated_flag="--responses-upstream-api-kind",
+        metavar="{chat_completions,responses}",
+        help=(
+            "External upstream transport kind. "
+            "Use `chat_completions` for `/v1/chat/completions` or `responses` for `/v1/responses`."
+        ),
+    ),
     ResponsesCliFlagSpec(
         field_name="web_search_profile",
         supervisor_flag="--web-search-profile",
@@ -125,6 +136,7 @@ RESPONSES_CLI_FLAG_SPECS = (
 class ResponsesCliArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    upstream_api_kind: UpstreamAPIKind | None = None
     web_search_profile: str | None = None
     code_interpreter_mode: CodeInterpreterMode | None = None
     code_interpreter_port: int | None = None
@@ -134,6 +146,16 @@ class ResponsesCliArgs(BaseModel):
     upstream_ready_interval_s: float | None = None
     mcp_config_path: str | None = None
     mcp_port: int | None = None
+
+    @field_validator("upstream_api_kind", mode="before")
+    @classmethod
+    def _normalize_upstream_api_kind(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip().lower()
+            return stripped or None
+        return value
 
     @field_validator("code_interpreter_mode", mode="before")
     @classmethod
@@ -213,6 +235,7 @@ class ResponsesCliArgs(BaseModel):
 @dataclass(frozen=True, slots=True)
 class ResolvedIntegratedResponsesCli:
     filtered_args: list[str]
+    upstream_api_kind: UpstreamAPIKind
     web_search_profile: str | None
     code_interpreter_mode: CodeInterpreterMode
     code_interpreter_port: int
@@ -316,6 +339,11 @@ def resolve_integrated_responses_cli(
         raise error_factory(f"{error_prefix} error: {exc}.") from None
 
     raw_values = {
+        "upstream_api_kind": (
+            integrated_raw_values["upstream_api_kind"]
+            if integrated_raw_values["upstream_api_kind"] is not None
+            else "chat_completions"
+        ),
         "web_search_profile": integrated_raw_values["web_search_profile"],
         "code_interpreter_mode": (
             integrated_raw_values["code_interpreter_mode"]
@@ -360,6 +388,7 @@ def resolve_integrated_responses_cli(
         raise AssertionError("integrated code interpreter timeout must be resolved")
     return ResolvedIntegratedResponsesCli(
         filtered_args=filtered_args,
+        upstream_api_kind=responses_cli.upstream_api_kind or "chat_completions",
         web_search_profile=responses_cli.web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=int(code_interpreter_port),

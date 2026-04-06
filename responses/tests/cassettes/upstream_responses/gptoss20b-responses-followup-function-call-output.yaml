@@ -1,0 +1,98 @@
+filename: 2026-03-30-019d3cca-d4f0-7d91-b86f-a4c1c2740f96
+request:
+  body:
+    input:
+      - arguments: '{"location":"Paris"}'
+        call_id: call_bae10f033e8eb973
+        id: fc_bae10f033e8eb973
+        name: get_weather
+        status: null
+        type: function_call
+      - call_id: call_bae10f033e8eb973
+        output: '{"temperature_c":21,"conditions":"sunny"}'
+        type: function_call_output
+      - content: Please answer using the function output.
+        role: user
+        type: message
+    model: openai/gpt-oss-20b
+    stream: false
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "426"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cca-d4f0-7d91-b86f-a4c1c2740f96
+response:
+  body:
+    background: false
+    created_at: 1774841419
+    id: resp_8c0c1a97b0ea9501
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 130963
+    max_tool_calls: null
+    metadata: null
+    model: openai/gpt-oss-20b
+    object: response
+    output:
+      - content:
+          - text: 'User says: "Please answer using the function output." The last function call gave weather. They likely want that output. So respond with the function output formatted. Provide JSON or text? The instruction says "using the function output". Use the output provided. So respond with "The temperature in Paris is 21°C, and the conditions are sunny."'
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_aae692fd6dc612dd
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+          - annotations: []
+            logprobs: null
+            text: The temperature in Paris is 21 °C, and the conditions are sunny.
+            type: output_text
+        id: msg_b5c38c3e0c63071d
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text: null
+    tool_choice: auto
+    tools: []
+    top_logprobs: null
+    top_p: 1.0
+    truncation: disabled
+    usage:
+      input_tokens: 109
+      input_tokens_details:
+        cached_tokens: 96
+        cached_tokens_per_turn:
+          - 96
+        input_tokens_per_turn:
+          - 109
+      output_tokens: 96
+      output_tokens_details:
+        output_tokens_per_turn:
+          - 96
+        reasoning_tokens: 71
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn:
+          - 0
+      total_tokens: 205
+    user: null
+  headers:
+    content-length: "1600"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T03:30:18.992633+00:00"

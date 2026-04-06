@@ -9,14 +9,17 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from loguru import logger
 from starlette.routing import BaseRoute, Route
 
 from vllm_responses.configs.builders import (
     build_runtime_config_for_integrated,
 )
-from vllm_responses.configs.runtime import RuntimeConfig
+from vllm_responses.configs.runtime import (
+    INTEGRATED_INTERNAL_ROUTE_PREFIX,
+    RuntimeConfig,
+)
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.configs.startup import find_flag_value
 from vllm_responses.entrypoints._helper_runtime import (
@@ -38,6 +41,7 @@ from vllm_responses.entrypoints._serve_utils import (
 from vllm_responses.entrypoints._state import get_vr_app_state, require_vr_app_state
 from vllm_responses.entrypoints.vllm._adapter import (
     load_api_server_module,
+    load_responses_router,
     run_upstream_cli,
     suppress_native_responses_attach,
 )
@@ -46,7 +50,6 @@ from vllm_responses.responses_core.store import configure_response_store
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
 from vllm_responses.tools.profile_resolution import profiled_builtin_requires_mcp
 from vllm_responses.utils.logging import setup_logger_sinks
-from vllm_responses.utils.urls import is_ready_url_host
 
 _RESPONSES_ROUTE_FAMILY = {
     ("POST", "/v1/responses"),
@@ -59,10 +62,6 @@ class _IntegratedRuntimeError(RuntimeError):
     def __init__(self, message: str, *, exit_code: int = 1) -> None:
         super().__init__(message)
         self.exit_code = int(exit_code)
-
-
-def derive_integrated_llm_api_base(*, host: str, port: int) -> str:
-    return f"http://{is_ready_url_host(host)}:{port}/v1"
 
 
 def _resolve_vllm_bind(spec: IntegratedServeSpec) -> tuple[str, int]:
@@ -156,23 +155,45 @@ def _install_integrated_lifespan(app: FastAPI) -> None:
     app.router.lifespan_context = _lifespan
 
 
+def _build_internal_native_responses_router(*, runtime_config: RuntimeConfig) -> APIRouter:
+    native_responses_router = load_responses_router()
+    internal_upstream_header = runtime_config.internal_upstream_header_name
+
+    async def _require_internal_upstream_header(request: Request) -> None:
+        if request.headers.get(internal_upstream_header) != "1":
+            raise HTTPException(status_code=404)
+
+    internal_router = APIRouter(
+        prefix=INTEGRATED_INTERNAL_ROUTE_PREFIX,
+        include_in_schema=False,
+        dependencies=[Depends(_require_internal_upstream_header)],
+    )
+    internal_router.include_router(native_responses_router, include_in_schema=False)
+    return internal_router
+
+
 def _build_integrated_app(
     args: Any,
-    supported_tasks: Any,
+    supported_tasks: Any = None,
+    model_config: Any = None,
     *,
-    upstream_build_app: Callable[[Any, Any], FastAPI],
+    upstream_build_app: Callable[..., FastAPI],
     runtime_config: RuntimeConfig,
 ) -> FastAPI:
     from vllm_responses.entrypoints.gateway._app import augment_integrated_gateway_app
     from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
 
     with suppress_native_responses_attach():
-        app = upstream_build_app(args, supported_tasks)
+        if model_config is None:
+            app = upstream_build_app(args, supported_tasks)
+        else:
+            app = upstream_build_app(args, supported_tasks, model_config)
 
     if not isinstance(app, FastAPI):
         raise RuntimeError("Integrated mode expected vLLM build_app(...) to return a FastAPI app.")
 
     augment_integrated_gateway_app(app, runtime_config=runtime_config)
+    app.include_router(_build_internal_native_responses_router(runtime_config=runtime_config))
     builtin_runtime_url = (runtime_config.mcp_builtin_runtime_url or "").strip()
     if builtin_runtime_url:
         require_vr_app_state(app).builtin_mcp_runtime_client = BuiltinMcpRuntimeClient(
@@ -356,6 +377,7 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
             env=env_source,
             host=host,
             port=port,
+            upstream_api_kind=spec.upstream_api_kind,
             web_search_profile=spec.web_search_profile,
             code_interpreter_mode=spec.code_interpreter_mode,
             code_interpreter_port=spec.code_interpreter_port,
@@ -386,10 +408,15 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
                 stop_event=helper_watchdog_stop,
             )
 
-        def _patched_build_app(args: Any, supported_tasks: Any) -> FastAPI:
+        def _patched_build_app(
+            args: Any,
+            supported_tasks: Any = None,
+            model_config: Any = None,
+        ) -> FastAPI:
             return _build_integrated_app(
                 args,
                 supported_tasks,
+                model_config,
                 upstream_build_app=original_build_app,
                 runtime_config=runtime_config,
             )

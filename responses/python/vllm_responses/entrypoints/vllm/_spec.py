@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vllm_responses.configs.runtime import CodeInterpreterMode
+from vllm_responses.configs.runtime import CodeInterpreterMode, UpstreamAPIKind
 from vllm_responses.configs.startup import (
     find_flag_value,
     format_integrated_responses_help_block,
@@ -25,6 +25,7 @@ class IntegratedServeSpec:
     code_interpreter_port: int
     code_interpreter_workers: int
     code_interpreter_startup_timeout_s: float
+    upstream_api_kind: UpstreamAPIKind = "chat_completions"
     mcp_config_path: str | None = None
     mcp_port: int | None = None
     web_search_profile: str | None = None
@@ -80,6 +81,7 @@ def build_integrated_serve_spec(raw_args: list[str]) -> IntegratedServeSpec:
 
     return IntegratedServeSpec(
         vllm_args=resolved_cli.filtered_args,
+        upstream_api_kind=resolved_cli.upstream_api_kind,
         web_search_profile=resolved_cli.web_search_profile,
         code_interpreter_mode=resolved_cli.code_interpreter_mode,
         code_interpreter_port=resolved_cli.code_interpreter_port,

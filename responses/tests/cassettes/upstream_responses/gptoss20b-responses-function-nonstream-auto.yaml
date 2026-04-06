@@ -1,0 +1,117 @@
+filename: 2026-03-30-019d3cc9-3947-7113-9b9c-6d7ef4646bbe
+request:
+  body:
+    input: Call the function get_weather for Paris and do not answer directly.
+    model: openai/gpt-oss-20b
+    stream: false
+    tool_choice: auto
+    tools:
+      - description: Get weather for a location.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              type: string
+          required:
+            - location
+          type: object
+        strict: true
+        type: function
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "381"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cc9-3947-7113-9b9c-6d7ef4646bbe
+response:
+  body:
+    background: false
+    created_at: 1774841313
+    id: resp_bce3d2c6b1db2033
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 130940
+    max_tool_calls: null
+    metadata: null
+    model: openai/gpt-oss-20b
+    object: response
+    output:
+      - content:
+          - text: "The user wants us to call the get_weather function for Paris, and not\
+              \ answer directly. We need to output the function call JSON. In the instructions:\
+              \ \"If a user requests a function, respond with the function call in JSON\
+              \ format. Do not add any additional text.\" But the system message might\
+              \ allow a reply? According to instruction in original custom instructions:\
+              \ \"If a user requests a function, respond with the function call in JSON\
+              \ format. Do not add any additional text.\" So we should reply the JSON\
+              \ with function name get_weather and arguments location: \"Paris\". No further\
+              \ text.\n\nThus: \n```json\n{\n  \"name\": \"get_weather\",\n  \"arguments\"\
+              : {\n    \"location\": \"Paris\"\n  }\n}\n```"
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_ac6a62d33bc3a250
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"location":"Paris"}'
+        call_id: call_bae10f033e8eb973
+        id: fc_bae10f033e8eb973
+        name: get_weather
+        status: null
+        type: function_call
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text: null
+    tool_choice: auto
+    tools:
+      - description: Get weather for a location.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              type: string
+          required:
+            - location
+          type: object
+        strict: true
+        type: function
+    top_logprobs: null
+    top_p: 1.0
+    truncation: disabled
+    usage:
+      input_tokens: 132
+      input_tokens_details:
+        cached_tokens: 48
+        cached_tokens_per_turn:
+          - 48
+        input_tokens_per_turn:
+          - 132
+      output_tokens: 173
+      output_tokens_details:
+        output_tokens_per_turn:
+          - 173
+        reasoning_tokens: 156
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn:
+          - 0
+      total_tokens: 305
+    user: null
+  headers:
+    content-length: "2095"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T03:28:33.607365+00:00"

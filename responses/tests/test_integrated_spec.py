@@ -16,6 +16,8 @@ def test_build_integrated_serve_spec_strips_responses_flags_and_uses_cli_values(
             "serve",
             "meta-llama/Llama-3.2-3B-Instruct",
             "--responses",
+            "--responses-upstream-api-kind",
+            "responses",
             "--responses-web-search-profile",
             "exa_mcp",
             "--responses-code-interpreter=external",
@@ -44,6 +46,7 @@ def test_build_integrated_serve_spec_strips_responses_flags_and_uses_cli_values(
         "--port",
         "8000",
     ]
+    assert spec.upstream_api_kind == "responses"
     assert spec.web_search_profile == "exa_mcp"
     assert spec.code_interpreter_mode == "external"
     assert spec.code_interpreter_port == 6111
@@ -59,6 +62,7 @@ def test_build_integrated_serve_spec_uses_builtin_defaults_when_flags_omitted() 
     )
 
     assert spec.vllm_args == ["serve", "model", "--port", "8000"]
+    assert spec.upstream_api_kind == "chat_completions"
     assert spec.web_search_profile is None
     assert spec.code_interpreter_mode == "spawn"
     assert spec.code_interpreter_port == 5970
@@ -149,6 +153,7 @@ def test_should_show_integrated_help_requires_help_and_responses() -> None:
 
 def test_format_integrated_help_mentions_upstream_vllm_help() -> None:
     help_text = format_integrated_help()
+    assert "--responses-upstream-api-kind" in help_text
     assert "--responses-web-search-profile" in help_text
     assert "Choices: duckduckgo_plus_fetch, exa_mcp." in help_text
     assert "--responses-mcp-config" in help_text

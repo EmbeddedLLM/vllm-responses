@@ -8,7 +8,7 @@ from types import ModuleType, SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.responses import ORJSONResponse
 
 from vllm_responses.configs.sources import EnvSource
@@ -41,6 +41,7 @@ def _install_fake_vllm(
     monkeypatch: pytest.MonkeyPatch,
     *,
     upstream_main,
+    build_app_arity: int = 2,
 ) -> ModuleType:
     vllm_mod = ModuleType("vllm")
     entrypoints_mod = ModuleType("vllm.entrypoints")
@@ -48,25 +49,32 @@ def _install_fake_vllm(
     cli_main_mod = ModuleType("vllm.entrypoints.cli.main")
     api_server_mod = ModuleType("vllm.entrypoints.openai.api_server")
     responses_api_router_mod = ModuleType("vllm.entrypoints.openai.responses.api_router")
+    router = APIRouter()
+
+    @router.post("/v1/responses")
+    async def native_responses_create() -> ORJSONResponse:
+        return ORJSONResponse({"native": "create"})
+
+    @router.get("/v1/responses/{response_id}")
+    async def native_responses_get(response_id: str) -> ORJSONResponse:
+        return ORJSONResponse({"native": response_id})
+
+    @router.post("/v1/responses/{response_id}/cancel")
+    async def native_responses_cancel(response_id: str) -> ORJSONResponse:
+        return ORJSONResponse({"cancelled": response_id})
 
     def attach_router(app: FastAPI) -> None:
-        @app.post("/v1/responses")
-        async def native_responses_create() -> ORJSONResponse:
-            return ORJSONResponse({"native": "create"})
+        app.include_router(router)
 
-        @app.get("/v1/responses/{response_id}")
-        async def native_responses_get(response_id: str) -> ORJSONResponse:
-            return ORJSONResponse({"native": response_id})
-
-        @app.post("/v1/responses/{response_id}/cancel")
-        async def native_responses_cancel(response_id: str) -> ORJSONResponse:
-            return ORJSONResponse({"cancelled": response_id})
-
+    responses_api_router_mod.router = router
     responses_api_router_mod.attach_router = attach_router
 
-    def original_build_app(args, supported_tasks) -> FastAPI:  # type: ignore[no-untyped-def]
+    def original_build_app(args, supported_tasks=None, model_config=None) -> FastAPI:  # type: ignore[no-untyped-def]
         _ = args
         _ = supported_tasks
+        _ = model_config
+        if build_app_arity == 2 and model_config is not None:
+            raise TypeError("unexpected model_config")
         app = FastAPI()
 
         @app.get("/health")
@@ -360,6 +368,41 @@ def test_run_integrated_serve_validates_external_code_interpreter_readiness(
     assert ready_calls[0]["timeout_s"] == 45.0
 
 
+def test_run_integrated_serve_responses_upstream_uses_internal_base(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_upstream_main() -> None:
+        app = api_server_mod.build_app(SimpleNamespace(), ["generate"])
+        runtime_config = app.state.vllm_responses.runtime_config
+        assert runtime_config is not None
+        seen["upstream_api_kind"] = runtime_config.upstream_api_kind
+        seen["llm_api_base"] = runtime_config.llm_api_base
+        raise SystemExit(0)
+
+    api_server_mod = _install_fake_vllm(monkeypatch, upstream_main=_fake_upstream_main)
+    _patch_runtime_dependencies(
+        monkeypatch,
+        env=EnvSource(environ={}),
+    )
+
+    spec = IntegratedServeSpec(
+        vllm_args=["serve", "model", "--port", "8005"],
+        code_interpreter_mode="disabled",
+        code_interpreter_port=5970,
+        code_interpreter_workers=0,
+        code_interpreter_startup_timeout_s=30.0,
+        upstream_api_kind="responses",
+    )
+
+    code = run_integrated_serve(spec)
+
+    assert code == 0
+    assert seen["upstream_api_kind"] == "responses"
+    assert seen["llm_api_base"] == "http://127.0.0.1:8005/_vllm_internal/v1"
+
+
 def test_run_integrated_serve_cleans_spawned_helpers_on_interrupt_during_startup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -506,3 +549,40 @@ async def test_shared_http_client_propagates_request_id_from_context() -> None:
 
     assert response.status_code == 200
     assert seen_headers["x-request-id"] == "req_123"
+
+
+def test_run_integrated_serve_accepts_three_arg_build_app_signature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def _fake_upstream_main() -> None:
+        model_config = SimpleNamespace(model="fake-model")
+        app = api_server_mod.build_app(SimpleNamespace(), ["generate"], model_config)
+        seen["mcp_url"] = app.state.vllm_responses.runtime_config.mcp_builtin_runtime_url
+        seen["model_config"] = model_config
+        raise SystemExit(0)
+
+    api_server_mod = _install_fake_vllm(
+        monkeypatch,
+        upstream_main=_fake_upstream_main,
+        build_app_arity=3,
+    )
+    _patch_runtime_dependencies(
+        monkeypatch,
+        env=EnvSource(environ={}),
+    )
+
+    spec = IntegratedServeSpec(
+        vllm_args=["serve", "model", "--port", "8005"],
+        code_interpreter_mode="disabled",
+        code_interpreter_port=5970,
+        code_interpreter_workers=0,
+        code_interpreter_startup_timeout_s=30.0,
+    )
+
+    code = run_integrated_serve(spec)
+
+    assert code == 0
+    assert seen["mcp_url"] is None
+    assert seen["model_config"] is not None

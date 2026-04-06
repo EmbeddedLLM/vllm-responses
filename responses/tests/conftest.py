@@ -34,13 +34,13 @@ def chat_completion_cassettes_dir() -> Path:
 
 
 @pytest.fixture
-def cassette_replayer_factory(
-    chat_completion_cassettes_dir: Path,
-) -> Callable[[str], CassetteReplayer]:
+def upstream_responses_cassettes_dir() -> Path:
+    return Path(__file__).resolve().parent / "cassettes" / "upstream_responses"
+
+
+def _cassette_replayer_factory(cassette_dir: Path) -> Callable[[str], CassetteReplayer]:
     def _make(*filenames: str) -> CassetteReplayer:
-        cassettes = [
-            load_cassette_yaml(chat_completion_cassettes_dir / name) for name in filenames
-        ]
+        cassettes = [load_cassette_yaml(cassette_dir / name) for name in filenames]
         return CassetteReplayer(
             scenarios={"default": CassetteQueue(name="default", cassettes=cassettes)},
             default_scenario="default",
@@ -48,6 +48,20 @@ def cassette_replayer_factory(
         )
 
     return _make
+
+
+@pytest.fixture
+def cassette_replayer_factory(
+    chat_completion_cassettes_dir: Path,
+) -> Callable[[str], CassetteReplayer]:
+    return _cassette_replayer_factory(chat_completion_cassettes_dir)
+
+
+@pytest.fixture
+def upstream_responses_replayer_factory(
+    upstream_responses_cassettes_dir: Path,
+) -> Callable[[str], CassetteReplayer]:
+    return _cassette_replayer_factory(upstream_responses_cassettes_dir)
 
 
 @pytest.fixture

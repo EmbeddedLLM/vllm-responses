@@ -1,0 +1,47 @@
+filename: 2026-03-30-019d3dbf-12e0-7bf1-8f1b-237938cbddfd
+request:
+  body:
+    input: Call the function get_weather for Paris and do not answer directly.
+    model: openai/gpt-oss-20b
+    store: false
+    stream: true
+    tool_choice:
+      name: get_weather
+      type: function
+    tools:
+      - description: Get weather for a location.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              type: string
+          required:
+            - location
+          type: object
+        strict: true
+        type: function
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "428"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: gptoss20b-responses-function-named-choice-stream.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3dbf-12e0-7bf1-8f1b-237938cbddfd
+response:
+  body:
+    error:
+      code: 501
+      message: Only 'auto' tool_choice is supported in response API with Harmony
+      param: null
+      type: NotImplementedError
+  headers:
+    content-length: "142"
+    content-type: application/json
+  status_code: 501
+timestamp: "2026-03-30T07:57:05.632860+00:00"

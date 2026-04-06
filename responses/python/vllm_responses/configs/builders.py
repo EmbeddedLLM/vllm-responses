@@ -4,7 +4,13 @@ from argparse import Namespace
 from pathlib import Path
 
 from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
-from vllm_responses.configs.runtime import CodeInterpreterMode, RuntimeConfig, RuntimeMode
+from vllm_responses.configs.runtime import (
+    INTEGRATED_INTERNAL_ROUTE_PREFIX,
+    CodeInterpreterMode,
+    RuntimeConfig,
+    RuntimeMode,
+    UpstreamAPIKind,
+)
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.configs.startup import (
     format_web_search_profile_choices,
@@ -45,10 +51,30 @@ def resolve_code_interpreter_mode(raw: str) -> CodeInterpreterMode:
     raise ValueError(f"invalid code interpreter mode: {raw!r}")
 
 
+def resolve_upstream_api_kind(raw: str) -> UpstreamAPIKind:
+    normalized = raw.strip().lower()
+    if normalized in {"chat_completions", "responses"}:
+        return normalized
+    raise ValueError(f"invalid upstream api kind: {raw!r}")
+
+
+def derive_integrated_llm_api_base(
+    *,
+    host: str,
+    port: int,
+    upstream_api_kind: UpstreamAPIKind,
+) -> str:
+    base_url = f"http://{is_ready_url_host(host)}:{int(port)}"
+    if upstream_api_kind == "responses":
+        return f"{base_url}{INTEGRATED_INTERNAL_ROUTE_PREFIX}/v1"
+    return f"{base_url}/v1"
+
+
 def build_common_runtime_config(
     *,
     env: EnvSource,
     runtime_mode: RuntimeMode,
+    upstream_api_kind: UpstreamAPIKind,
     gateway_host: str,
     gateway_port: int,
     gateway_workers: int,
@@ -93,6 +119,7 @@ def build_common_runtime_config(
 
     return RuntimeConfig(
         runtime_mode=runtime_mode,
+        upstream_api_kind=upstream_api_kind,
         gateway_host=gateway_host,
         gateway_port=int(gateway_port),
         gateway_workers=int(gateway_workers),
@@ -177,6 +204,9 @@ def build_runtime_config_for_standalone(
     runtime_mode: RuntimeMode = "standalone",
 ) -> RuntimeConfig:
     env = EnvSource.from_env() if env is None else env
+    upstream_api_kind = resolve_upstream_api_kind(
+        env.get_str("VR_UPSTREAM_API_KIND", "chat_completions")
+    )
     code_interpreter_mode = resolve_code_interpreter_mode(
         env.get_str("VR_CODE_INTERPRETER_MODE", RUNTIME_DEFAULTS.code_interpreter_mode)
     )
@@ -196,6 +226,7 @@ def build_runtime_config_for_standalone(
     return build_common_runtime_config(
         env=env,
         runtime_mode=runtime_mode,
+        upstream_api_kind=upstream_api_kind,
         gateway_host=env.get_str("VR_HOST", RUNTIME_DEFAULTS.host),
         gateway_port=env.get_int("VR_PORT", RUNTIME_DEFAULTS.port),
         gateway_workers=env.get_int("VR_WORKERS", RUNTIME_DEFAULTS.workers),
@@ -275,6 +306,11 @@ def build_runtime_config_for_supervisor(
     return build_common_runtime_config(
         env=env,
         runtime_mode="supervisor",
+        upstream_api_kind=(
+            "chat_completions"
+            if responses_cli.upstream_api_kind is None
+            else responses_cli.upstream_api_kind
+        ),
         gateway_host=(
             RUNTIME_DEFAULTS.host if gateway_host_arg is None else str(gateway_host_arg)
         ),
@@ -314,6 +350,7 @@ def build_runtime_config_for_integrated(
     env: EnvSource | None,
     host: str,
     port: int,
+    upstream_api_kind: UpstreamAPIKind = "chat_completions",
     web_search_profile: str | None,
     code_interpreter_mode: CodeInterpreterMode,
     code_interpreter_port: int,
@@ -332,10 +369,15 @@ def build_runtime_config_for_integrated(
     return build_common_runtime_config(
         env=env,
         runtime_mode="integrated",
+        upstream_api_kind=upstream_api_kind,
         gateway_host=host,
         gateway_port=port,
         gateway_workers=1,
-        llm_api_base=f"http://{is_ready_url_host(host)}:{port}/v1",
+        llm_api_base=derive_integrated_llm_api_base(
+            host=host,
+            port=port,
+            upstream_api_kind=upstream_api_kind,
+        ),
         web_search_profile=web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=effective_code_interpreter_port,

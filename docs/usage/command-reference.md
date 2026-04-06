@@ -31,6 +31,21 @@ These options control where the gateway finds the inference server.
 
 **Description**: Exact base URL of an external OpenAI-compatible server. **Default**: `None` **Example**: `--upstream http://127.0.0.1:8000/v1` **Notes**: Provide the exact API base URL you want the gateway to call.
 
+#### `--upstream-api-kind {chat_completions,responses}`
+
+**Description**: Selects which upstream inference transport the gateway should call. **Default**: `chat_completions`
+
+**Values**:
+
+- `chat_completions`: Use upstream `POST /v1/chat/completions`.
+- `responses`: Use upstream `POST /v1/responses`.
+
+**Notes**:
+
+- This changes only the gateway-to-upstream transport. The public gateway API remains `POST /v1/responses`.
+- The corresponding integrated-mode selector is `--responses-upstream-api-kind {chat_completions,responses}` on `vllm serve --responses`.
+- Gateway-owned semantics stay local in either mode: `previous_response_id`, retrieval, `store`, `include`, built-in tools, and MCP are not delegated upstream.
+
 #### `--upstream-ready-timeout SECONDS`
 
 **Description**: Maximum time to wait for the upstream readiness check to succeed. **Default**: `1800` (30 minutes)
@@ -126,6 +141,17 @@ Upstream selection precedence:
 1. `--upstream` (external upstream exact API base URL).
 1. Otherwise: configuration error ("no upstream configured").
 
+Upstream transport selection:
+
+1. `--upstream-api-kind responses` selects upstream native Responses transport.
+1. If omitted, the gateway uses `chat_completions`.
+
+Integrated mode transport selection:
+
+1. `--responses-upstream-api-kind responses` selects the guarded internal native Responses transport.
+1. If omitted, integrated mode uses `chat_completions`.
+1. This changes only the gateway-to-upstream transport. Public `POST /v1/responses` and `GET /v1/responses/{response_id}` remain gateway-owned.
+
 ## Examples
 
 ### Connect to External Server
@@ -146,6 +172,14 @@ vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 vllm-responses serve \
   --gateway-workers 4 \
   --upstream http://127.0.0.1:8000/v1
+```
+
+### Use Native Upstream Responses Transport
+
+```bash
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --upstream-api-kind responses
 ```
 
 ### Enable Web Search

@@ -620,6 +620,7 @@ async def test_web_search_executor_search_open_page_and_find_in_page() -> None:
         "web_search_exa",
         "crawling_exa",
     ]
+    assert runtime_client.calls[1][2] == {"urls": ["https://example.com/a?utm=1"]}
 
 
 @pytest.mark.anyio

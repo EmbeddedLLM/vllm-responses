@@ -51,6 +51,7 @@ def _build_gateway_worker_env(
     runtime_config = spec.runtime_config
 
     gateway_env["VR_LLM_API_BASE"] = spec.upstream.base_url
+    gateway_env["VR_UPSTREAM_API_KIND"] = runtime_config.upstream_api_kind
     gateway_env["VR_HOST"] = spec.gateway.host
     gateway_env["VR_PORT"] = str(spec.gateway.port)
     gateway_env["VR_WORKERS"] = str(spec.gateway.workers)

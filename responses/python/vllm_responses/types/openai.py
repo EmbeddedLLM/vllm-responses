@@ -42,7 +42,7 @@ from pydantic_ai import (
     UsageLimits,
     UserPromptPart,
 )
-from pydantic_ai.models.openai import OpenAIChatModelSettings
+from pydantic_ai.models.openai import OpenAIChatModelSettings, OpenAIResponsesModelSettings
 from pydantic_ai.toolsets.abstract import AbstractToolset
 from pydantic_extra_types.timezone_name import TimeZoneName
 
@@ -909,6 +909,16 @@ class OpenAIAllowedToolsChoice(BaseModel):
             )
 
 
+class OpenAIResponsesTransportFunctionToolChoice(TypedDict):
+    type: Literal["function"]
+    name: str
+
+
+OpenAIResponsesTransportToolChoice = (
+    Literal["required"] | OpenAIResponsesTransportFunctionToolChoice
+)
+
+
 def _normalize_hosted_tool_type(tool_type: str) -> str:
     if tool_type in {"web_search_preview", "web_search_2025_08_26"}:
         return WEB_SEARCH_TOOL
@@ -1460,6 +1470,24 @@ class vLLMResponsesRequest(BaseModel):
             ),
         ),
     ] = None
+    prompt_cache_key: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Used to cache responses for similar requests to optimize cache hit rates. "
+                "Replaces the `user` field."
+            ),
+        ),
+    ] = None
+    prompt_cache_retention: Annotated[
+        Literal["24h"] | None,
+        Field(
+            description=(
+                "The retention policy for the prompt cache. "
+                "Set to `24h` to keep cached prefixes active for longer."
+            ),
+        ),
+    ] = None
     reasoning: Annotated[
         OpenAIReasoningEffort | None,
         Field(
@@ -1467,6 +1495,21 @@ class vLLMResponsesRequest(BaseModel):
                 "Configuration options for reasoning models. "
                 "Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response."
             )
+        ),
+    ] = None
+    safety_identifier: Annotated[
+        str | None,
+        Field(
+            description=(
+                "A stable identifier used to help detect end users of your application "
+                "that may be violating usage policies."
+            ),
+        ),
+    ] = None
+    service_tier: Annotated[
+        Literal["auto", "default", "flex", "priority"] | None,
+        Field(
+            description=("Specifies the processing type used for serving the request."),
         ),
     ] = None
     store: Annotated[
@@ -1569,6 +1612,14 @@ class vLLMResponsesRequest(BaseModel):
             ),
         ),
     ] = 1.0
+    truncation: Annotated[
+        Literal["auto", "disabled"],
+        Field(description=("The truncation strategy to use for the model response.")),
+    ] = "disabled"
+    user: Annotated[
+        str | None,
+        Field(description=("A stable identifier for your end-users.")),
+    ] = None
 
     @field_validator("tools", mode="after")
     @classmethod
@@ -1743,11 +1794,14 @@ class vLLMResponsesRequest(BaseModel):
 
                 if isinstance(msg, OpenAIReasoningItem):
                     msg_id = msg.id
-                    content = ""
-                    if msg.content:
-                        content = "".join(c.text for c in msg.content)
-                    if (not msg.encrypted_content) and msg.summary:
+                    content = "".join(c.text for c in msg.content)
+                    if not content and (not msg.encrypted_content) and msg.summary:
                         content = "".join(c.text for c in msg.summary)
+                    provider_details: dict[str, Any] | None = None
+                    if msg.content:
+                        provider_details = {
+                            "raw_content": [content_item.text for content_item in msg.content]
+                        }
                     message_history.append(
                         ModelResponse(
                             parts=[
@@ -1755,6 +1809,7 @@ class vLLMResponsesRequest(BaseModel):
                                     content=content,
                                     signature=msg.encrypted_content,
                                     id=msg_id,
+                                    provider_details=provider_details,
                                     # provider_name="openai",
                                 )
                             ],
@@ -2130,6 +2185,150 @@ class vLLMResponsesRequest(BaseModel):
             }
 
         raise BadInputError(f"Unsupported text.format for chat backend: {type(format_config)!r}")
+
+    def _is_harmony_responses_model(self) -> bool:
+        # Phase-1 native Responses handling only has model-family-specific evidence for Harmony
+        # `gpt-oss`, so keep the detector centralized and intentionally conservative.
+        return "gpt-oss" in self.model.casefold()
+
+    def _has_effective_custom_function_tools(self) -> bool:
+        return any(isinstance(tool, OpenAIResponsesFunctionTool) for tool in (self.tools or ()))
+
+    def _is_non_auto_custom_function_tool_choice(self) -> bool:
+        if not self._has_effective_custom_function_tools():
+            return False
+
+        choice = self.tool_choice
+        if choice in {"auto", "none"}:
+            return False
+        if choice == "required":
+            return True
+        if isinstance(choice, OpenAIFunctionToolChoice):
+            return True
+        if isinstance(choice, OpenAIAllowedToolsChoice):
+            return choice.mode == "required" and any(
+                isinstance(tool, OpenAIFunctionToolChoice) for tool in choice.tools
+            )
+        return False
+
+    def _as_openai_responses_transport_tool_choice(
+        self,
+    ) -> OpenAIResponsesTransportToolChoice | None:
+        choice = self.tool_choice
+
+        if isinstance(choice, OpenAIFunctionToolChoice):
+            return OpenAIResponsesTransportFunctionToolChoice(
+                type="function",
+                name=choice.name,
+            )
+
+        if choice == "required" and self._has_effective_custom_function_tools():
+            return "required"
+
+        if isinstance(choice, OpenAIAllowedToolsChoice):
+            if choice.mode == "required" and any(
+                isinstance(tool, OpenAIFunctionToolChoice) for tool in choice.tools
+            ):
+                return "required"
+
+        return None
+
+    def as_openai_responses_settings(self) -> OpenAIResponsesModelSettings:
+        extra_body: dict[str, Any] = {}
+        responses_text_verbosity: Literal["low", "medium", "high"] | None = None
+
+        if self._is_harmony_responses_model() and self._is_non_auto_custom_function_tool_choice():
+            # Harmony-backed upstream Responses rejects forced custom-function choices in
+            # practice. Fail before the upstream call so the gateway owns that policy
+            # boundary instead of depending on model-family-specific upstream errors.
+            raise BadInputError(
+                'Harmony upstream Responses only supports `tool_choice="auto"` for custom function tools.'
+            )
+
+        if self.text is not None:
+            if self._is_non_auto_custom_function_tool_choice():
+                # `pydantic_ai` owns the upstream Responses `text.format` payload for forced
+                # custom function calling so it can preserve the tool-calling schema. Only
+                # merge caller-selected verbosity through the first-class model setting.
+                if self.text.format is not None:
+                    raise BadInputError(
+                        "Non-auto custom function tool choice cannot be combined with "
+                        "`text.format`; only `text.verbosity` is supported."
+                    )
+                responses_text_verbosity = self.text.verbosity
+            else:
+                # When the gateway itself owns the upstream Responses `text` payload, forward
+                # the caller-selected text config unchanged via transport `extra_body`.
+                extra_body["text"] = self.text.model_dump(
+                    mode="python",
+                    exclude_none=True,
+                    by_alias=True,
+                )
+
+        transport_tool_choice = self._as_openai_responses_transport_tool_choice()
+        if transport_tool_choice is not None:
+            # Only forward the custom-function subset that has a direct native Responses
+            # transport representation. Gateway-owned built-ins/MCP policy still lives in
+            # `as_run_settings(...)`, not in upstream-native tool declarations.
+            extra_body["tool_choice"] = transport_tool_choice
+
+        if self.metadata is not None:
+            # `metadata` is request metadata, not a gateway-owned control field, so it can
+            # pass through to upstream Responses without affecting local state semantics.
+            extra_body["metadata"] = self.metadata
+
+        settings: dict[str, Any] = {
+            # Preserve the caller's sampling/parallelism controls for the actual upstream
+            # inference request.
+            "parallel_tool_calls": self.parallel_tool_calls,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            # Upstream Responses persistence is explicitly not part of phase-1 ownership;
+            # the gateway keeps storage/retrieval/continuation local.
+            "openai_store": False,
+            # Gateway-owned continuation replays local history; do not ask upstream to
+            # validate gateway-generated item ids as if they came from upstream persistence.
+            "openai_send_reasoning_ids": False,
+            # `truncation` is a native Responses transport option and can be forwarded as-is.
+            "openai_truncation": self.truncation,
+            # These modeled request fields are intentionally gateway-local in phase 1 even
+            # for native upstream Responses mode: `user`, `service_tier`,
+            # `prompt_cache_key`, and `prompt_cache_retention` are accepted for contract
+            # compatibility but not forwarded upstream.
+        }
+
+        if self.max_output_tokens is not None:
+            # `pydantic_ai` exposes a shared `max_tokens` knob even for Responses transport;
+            # map the downstream Responses name onto that client setting.
+            settings["max_tokens"] = self.max_output_tokens
+
+        if self.reasoning is not None:
+            # Reasoning effort/summary are native Responses controls and should influence the
+            # upstream model call directly.
+            settings["openai_reasoning_effort"] = self.reasoning.effort
+            if self.reasoning.summary is not None:
+                settings["openai_reasoning_summary"] = self.reasoning.summary
+
+        if responses_text_verbosity is not None:
+            settings["openai_text_verbosity"] = responses_text_verbosity
+
+        if self.top_logprobs is not None:
+            # OpenAI's client surface requires the boolean gate and the top-n count together;
+            # any explicit integer, including `0`, means the downstream request asked for
+            # logprobs.
+            settings["openai_logprobs"] = True
+            settings["openai_top_logprobs"] = self.top_logprobs
+        else:
+            # Make the disabled state explicit so the upstream request does not inherit an
+            # accidental logprobs default from a reused settings object.
+            settings["openai_logprobs"] = False
+
+        if extra_body:
+            # Keep transport-specific fields grouped under `extra_body` so the shared model
+            # settings surface only carries values with first-class client support.
+            settings["extra_body"] = extra_body
+
+        return OpenAIResponsesModelSettings(**settings)
 
     def as_openai_chat_settings(self) -> OpenAIChatModelSettings:
         """

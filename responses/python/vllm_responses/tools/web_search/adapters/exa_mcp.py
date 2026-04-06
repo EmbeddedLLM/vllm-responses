@@ -164,7 +164,9 @@ class ExaMcpOpenPageAdapter(BuiltinActionAdapter, OpenPageAdapter):
             result = await client.call_tool(
                 server_label=self.server_label,
                 tool_name="crawling_exa",
-                arguments={"url": url},
+                # Exa's crawl MCP tool reads one or more pages via `urls`, even for
+                # our single-page open_page action.
+                arguments={"urls": [url]},
             )
         except (BuiltinMcpRuntimeTransportError, RuntimeError) as exc:
             return ActionOutcome(ok=False, error=str(exc))

@@ -1,0 +1,138 @@
+filename: 2026-03-30-019d3cc9-ebd9-7e91-b815-875db6da10dc
+request:
+  body:
+    input:
+      - arguments: '{"city": "Boston"}'
+        call_id: chatcmpl-tool-880f41c6876eb36f
+        id: fc_a4ec8e35f0416e8a
+        name: get_weather
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-880f41c6876eb36f
+        output: The weather in Boston is sunny, 72F.
+        type: function_call_output
+      - content: Reply with the weather only.
+        role: user
+    model: Qwen/Qwen3.5-35B-A3B
+    store: false
+    stream: false
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "425"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: qwen35a3b-responses-followup-with-user-message.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cc9-ebd9-7e91-b815-875db6da10dc
+response:
+  body:
+    background: false
+    created_at: 1774841359
+    id: resp_bbe7684587db31d0
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 262077
+    max_tool_calls: null
+    metadata: null
+    model: Qwen/Qwen3.5-35B-A3B
+    object: response
+    output:
+      - content:
+          - text: "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: A\
+              \ previous interaction where I (the AI) called a function `get_weather`\
+              \ for \"Boston\" and received the result \"The weather in Boston is sunny,\
+              \ 72F.\"\n    *   Current Instruction: \"Reply with the weather only.\"\n\
+              \    *   Constraint: The user wants *only* the weather information, presumably\
+              \ in a concise format, based on the previous function call result.\n\n2.\
+              \  **Review Previous Output:**\n    *   Function Call: `get_weather(city=\"\
+              Boston\")`\n    *   Function Result: \"The weather in Boston is sunny, 72F.\"\
+              \n\n3.  **Determine the Response:**\n    *   The user explicitly said \"\
+              Reply with the weather only.\"\n    *   I need to extract the core weather\
+              \ information from the function result.\n    *   Option 1: \"Sunny, 72F\"\
+              \n    *   Option 2: \"Boston: Sunny, 72F\"\n    *   Option 3: \"The weather\
+              \ in Boston is sunny, 72F.\" (Too verbose based on \"only\")\n    *   Option\
+              \ 4: \"Sunny, 72°F\"\n\n4.  **Select Best Format:**\n    *   \"Sunny, 72F\"\
+              \ is direct and concise.\n    *   Including the city name might be helpful\
+              \ for context, but \"weather only\" often implies the condition and temperature.\n\
+              \    *   Let's stick to the core data: Condition + Temperature.\n    * \
+              \  Actually, looking at the instruction \"Reply with the weather only\"\
+              , it usually means don't add conversational filler like \"Here is the weather:\"\
+              \ or \"I found this...\".\n    *   The most accurate representation of \"\
+              weather\" from the result is \"Sunny, 72F\".\n\n5.  **Final Decision:**\n\
+              \    *   Output: Sunny, 72F.\n\n6.  **Double Check:**\n    *   Does it include\
+              \ extra text? No.\n    *   Does it convey the weather? Yes.\n    *   Is\
+              \ it consistent with the function result? Yes.\n\n    *Self-Correction:*\
+              \ Maybe include the city? \"Boston: Sunny, 72F\". But the prompt says \"\
+              weather only\". Often users want just the condition/temp. However, context\
+              \ matters. Let's look at the function result again: \"The weather in Boston\
+              \ is sunny, 72F.\"\n    If I say \"Sunny, 72F\", it's the weather.\n   \
+              \ If I say \"Boston: Sunny, 72F\", it's location + weather.\n    Given the\
+              \ strict \"only\", I will provide the condition and temperature.\n\n   \
+              \ *Refinement:* \"Sunny, 72F\" is good. \"Sunny, 72°F\" is also good. I'll\
+              \ stick to the exact format from the function result mostly but stripped\
+              \ of the sentence structure.\n    Actually, the simplest is just the status\
+              \ and temp.\n\n    Let's go with: \"Sunny, 72F\"\n\n    Wait, I should consider\
+              \ if the user wants the *entire* string from the tool response but without\
+              \ conversation. \"The weather in Boston is sunny, 72F.\" -> \"Sunny, 72F\"\
+              \ is better.\n\n    Let's try to be as concise as possible while remaining\
+              \ clear.\n    \"Sunny, 72F\"\n\n    Wait, one more thought: Sometimes \"\
+              weather only\" means \"Don't say 'Sure, here is the weather'\". Just give\
+              \ the info.\n    So, \"Sunny, 72F\" is appropriate.\n\n    Final check:\
+              \ The prompt is \"Reply with the weather only.\"\n    Response: Sunny, 72F.\n"
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_ae3d2b013fe5571a
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+          - annotations: []
+            logprobs: null
+            text: "
+
+
+              Sunny, 72F"
+            type: output_text
+        id: msg_8ec40b2ddf61c3b9
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text: null
+    tool_choice: auto
+    tools: []
+    top_logprobs: null
+    top_p: 0.95
+    truncation: disabled
+    usage:
+      input_tokens: 67
+      input_tokens_details:
+        cached_tokens: 0
+        cached_tokens_per_turn: []
+        input_tokens_per_turn: []
+      output_tokens: 831
+      output_tokens_details:
+        output_tokens_per_turn: []
+        reasoning_tokens: 0
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn: []
+      total_tokens: 898
+    user: null
+  headers:
+    content-length: "4186"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T03:29:19.321301+00:00"

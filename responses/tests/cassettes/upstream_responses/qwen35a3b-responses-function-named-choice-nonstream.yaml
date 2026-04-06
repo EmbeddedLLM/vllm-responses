@@ -1,0 +1,130 @@
+filename: 2026-03-30-019d3cc9-e967-7bc3-86c2-dc06fb2bc8a0
+request:
+  body:
+    input: Call the function get_weather for Boston and do not answer directly.
+    model: Qwen/Qwen3.5-35B-A3B
+    store: false
+    stream: false
+    tool_choice:
+      name: get_weather
+      type: function
+    tools:
+      - description: Get weather for a location.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+            - city
+          type: object
+        strict: true
+        type: function
+  headers:
+    accept: "*/*"
+    accept-encoding: gzip, deflate, br
+    connection: keep-alive
+    content-length: "424"
+    content-type: application/json
+    user-agent: python-httpx/0.28.1
+    x-run-id: qwen35a3b-responses-function-named-choice-nonstream.yaml
+  method: POST
+  path: /v1/responses
+  query_params: {}
+request_id: 019d3cc9-e967-7bc3-86c2-dc06fb2bc8a0
+response:
+  body:
+    background: false
+    created_at: 1774841358
+    id: resp_a3fa415254c9e79d
+    incomplete_details: null
+    input_messages: null
+    instructions: null
+    max_output_tokens: 261847
+    max_tool_calls: null
+    metadata: null
+    model: Qwen/Qwen3.5-35B-A3B
+    object: response
+    output:
+      - content:
+          - text:
+              'The user wants me to call the get_weather function for Boston and they specifically asked me not to answer directly. This means I should just make the function call without providing any additional information or response.
+
+
+              Let me call the get_weather function with city parameter set to "Boston".
+
+              '
+            type: reasoning_text
+        encrypted_content: null
+        id: rs_8db2b25b3b244924
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: "{\n  \"city\": \"Boston\"\n}"
+        call_id: chatcmpl-tool-9ff10126248a0212
+        id: fc_8d8b4e6d1c360da2
+        name: get_weather
+        status: completed
+        type: function_call
+    output_messages: null
+    parallel_tool_calls: true
+    previous_response_id: null
+    prompt: null
+    reasoning: null
+    service_tier: auto
+    status: completed
+    temperature: 1.0
+    text:
+      format:
+        description: Response format for tool calling
+        name: tool_calling_response
+        schema_:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+            - city
+          type: object
+        strict: true
+        type: json_schema
+      verbosity: null
+    tool_choice:
+      name: get_weather
+      type: function
+    tools:
+      - description: Get weather for a location.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+            - city
+          type: object
+        strict: true
+        type: function
+    top_logprobs: null
+    top_p: 0.95
+    truncation: disabled
+    usage:
+      input_tokens: 297
+      input_tokens_details:
+        cached_tokens: 0
+        cached_tokens_per_turn: []
+        input_tokens_per_turn: []
+      output_tokens: 69
+      output_tokens_details:
+        output_tokens_per_turn: []
+        reasoning_tokens: 0
+        tool_output_tokens: 0
+        tool_output_tokens_per_turn: []
+      total_tokens: 366
+    user: null
+  headers:
+    content-length: "1987"
+    content-type: application/json
+  status_code: 200
+timestamp: "2026-03-30T03:29:18.695687+00:00"

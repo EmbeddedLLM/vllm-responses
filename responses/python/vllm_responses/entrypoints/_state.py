@@ -41,7 +41,7 @@ class VRAppState:
 class VRRequestState:
     """Typed container for `Request.state.vllm_responses`.
 
-    This is initialized for every request by middleware so downstream code can safely access
+    This is initialized for every request by the gateway entrypoint wrapper so downstream code can safely access
     request-scoped values (e.g. request id) via `request.state.vllm_responses`.
     """
 
