@@ -64,3 +64,4 @@ responses/python/vllm_responses/tools/code_interpreter/pyodide-*.tar.bz2
 **/vl_data/
 **/rqlite_db/
 responses/python/vllm_responses/tools/code_interpreter/**/code-interpreter-server
+responses/python/vllm_responses/tools/code_interpreter/woma
