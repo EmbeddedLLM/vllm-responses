@@ -29,6 +29,7 @@ def test_build_runtime_config_for_standalone_reads_env_overrides() -> None:
                 "VR_CODE_INTERPRETER_PORT": "6111",
                 "VR_CODE_INTERPRETER_WORKERS": "2",
                 "VR_CODE_INTERPRETER_STARTUP_TIMEOUT": "12.5",
+                "VR_CODE_INTERPRETER_EGRESS_POLICY_PATH": "/tmp/egress-policy.json",
             }
         )
     )
@@ -42,6 +43,7 @@ def test_build_runtime_config_for_standalone_reads_env_overrides() -> None:
     assert runtime_config.code_interpreter_port == 6111
     assert runtime_config.code_interpreter_workers == 2
     assert runtime_config.code_interpreter_startup_timeout_s == 12.5
+    assert runtime_config.code_interpreter_egress_policy_path == "/tmp/egress-policy.json"
     assert runtime_config.mcp_builtin_runtime_url == "http://127.0.0.1:5981"
 
 
@@ -76,6 +78,7 @@ def test_config_helpers_do_not_bootstrap_builtin_registries(
             "code_interpreter_port": None,
             "code_interpreter_workers": None,
             "code_interpreter_startup_timeout_s": None,
+            "code_interpreter_egress_policy_path": None,
             "upstream_ready_timeout_s": None,
             "upstream_ready_interval_s": None,
             "mcp_config_path": None,
@@ -113,6 +116,7 @@ def test_build_runtime_config_for_supervisor_ignores_web_search_env_without_cli(
             code_interpreter_port=None,
             code_interpreter_workers=None,
             code_interpreter_startup_timeout=None,
+            code_interpreter_egress_policy=None,
             upstream_ready_timeout=None,
             upstream_ready_interval=None,
             mcp_config=None,
@@ -190,6 +194,7 @@ def test_get_openai_provider_uses_integrated_http_client(monkeypatch) -> None:
         code_interpreter_port=5970,
         code_interpreter_workers=0,
         code_interpreter_startup_timeout_s=30.0,
+        code_interpreter_egress_policy_path=None,
         mcp_config_path=None,
         mcp_builtin_runtime_url=None,
     )
@@ -211,6 +216,7 @@ def test_build_runtime_config_for_integrated_ignores_web_search_env_without_cli(
         code_interpreter_port=5970,
         code_interpreter_workers=0,
         code_interpreter_startup_timeout_s=30.0,
+        code_interpreter_egress_policy_path=None,
         mcp_config_path=None,
         mcp_builtin_runtime_url=None,
     )

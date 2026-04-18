@@ -157,7 +157,7 @@ async def test_run_code_reads_runtime_port_from_bound_config(monkeypatch) -> Non
 
     assert response == '{"status":"success"}'
     assert captured["url"] == "http://localhost:6112/python"
-    assert captured["json"] == {"code": "print('ok')"}
+    assert captured["json"] == {"code": "print('ok')", "reset_globals": True}
 
 
 async def test_run_code_rejects_disabled_runtime_config() -> None:
@@ -195,6 +195,49 @@ async def test_bind_runtime_config_preserves_existing_tool_runtime_context() -> 
     assert bound_context is not None
     assert bound_context.runtime_config.code_interpreter_port == 6113
     assert bound_context.web_search is sentinel_web_search
+
+
+async def test_code_interpreter_egress_policy_path_is_resolved_and_forwarded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import vllm_responses.entrypoints._helper_runtime as helper_runtime_mod
+    import vllm_responses.tools.code_interpreter as code_interpreter_mod
+
+    policy_path = tmp_path / "egress-policy.json"
+    policy_path.write_text("{}", encoding="utf-8")
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_CODE_INTERPRETER_MODE": "spawn",
+                "VR_CODE_INTERPRETER_PORT": "6002",
+                "VR_CODE_INTERPRETER_DEV_BUN_FALLBACK": "1",
+                "VR_PYODIDE_CACHE_DIR": str(tmp_path / "pyodide-cache"),
+                "VR_CODE_INTERPRETER_EGRESS_POLICY_PATH": str(policy_path),
+            }
+        )
+    )
+
+    assert runtime_config.code_interpreter_egress_policy_path == str(policy_path.resolve())
+
+    monkeypatch.setattr(code_interpreter_mod.shutil, "which", lambda name: "/usr/bin/bun")
+    argv, _cwd = code_interpreter_mod._get_spawn_command(  # type: ignore[attr-defined]
+        runtime_config=runtime_config,
+        port=6002,
+        workers=0,
+        pyodide_cache_dir=str(tmp_path / "pyodide-cache"),
+    )
+    assert "--egress-policy-file" in argv
+    assert argv[argv.index("--egress-policy-file") + 1] == str(policy_path.resolve())
+
+    monkeypatch.setattr(helper_runtime_mod.shutil, "which", lambda name: "/usr/bin/bun")
+    spec = helper_runtime_mod.build_code_interpreter_spawn_spec(
+        runtime_config,
+        error_factory=RuntimeError,
+        error_prefix="[test]",
+    )
+    assert "--egress-policy-file" in spec.cmd
+    assert spec.cmd[spec.cmd.index("--egress-policy-file") + 1] == str(policy_path.resolve())
 
 
 async def test_start_server_uses_runtime_config_startup_timeout(monkeypatch) -> None:

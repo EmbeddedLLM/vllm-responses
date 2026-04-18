@@ -32,6 +32,7 @@ def _base_args(**overrides) -> argparse.Namespace:
         code_interpreter_port=None,
         code_interpreter_workers=None,
         code_interpreter_startup_timeout=None,
+        code_interpreter_egress_policy=None,
         upstream_ready_timeout=None,
         upstream_ready_interval=None,
         mcp_config=None,
@@ -67,6 +68,31 @@ def test_build_runtime_config_for_supervisor_accepts_upstream_api_kind() -> None
         env=EnvSource(environ={}),
     )
     assert runtime_config.upstream_api_kind == "responses"
+
+
+def test_build_runtime_config_for_supervisor_accepts_hyphenated_chat_completions_alias() -> None:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            upstream_api_kind="chat-completions",
+        ),
+        env=EnvSource(environ={}),
+    )
+    assert runtime_config.upstream_api_kind == "chat_completions"
+
+
+def test_build_runtime_config_for_supervisor_rejects_unknown_upstream_api_kind() -> None:
+    with pytest.raises(
+        RuntimeConfigError,
+        match=r"--upstream-api-kind must be one of \{chat_completions,responses\}",
+    ):
+        build_runtime_config_for_supervisor(
+            args=_base_args(
+                upstream="http://127.0.0.1:8457",
+                upstream_api_kind="chat",
+            ),
+            env=EnvSource(environ={}),
+        )
 
 
 def test_build_gateway_worker_env_propagates_upstream_api_kind() -> None:
@@ -163,6 +189,58 @@ def test_build_serve_spec_code_interpreter_prefers_bundled_binary(
     assert spec.code_interpreter.cmd[0] == str(bundled)
     assert spec.code_interpreter.cmd[-2:] == ["--workers", "2"]
     assert spec.code_interpreter.cwd == tmp_path
+
+
+def test_build_serve_spec_code_interpreter_cli_egress_policy_overrides_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import vllm_responses.entrypoints._helper_runtime as helper_runtime_mod
+
+    class _FakeSpec:
+        def __init__(self, path: Path) -> None:
+            self.submodule_search_locations = [str(path)]
+
+    monkeypatch.setattr(
+        helper_runtime_mod.importlib.util, "find_spec", lambda name: _FakeSpec(tmp_path)
+    )
+
+    bundled = tmp_path / "bin" / "linux" / "x86_64" / "code-interpreter-server"
+    bundled.parent.mkdir(parents=True)
+    bundled.write_text("stub", encoding="utf-8")
+
+    cli_policy = tmp_path / "cli-policy.json"
+    env_policy = tmp_path / "env-policy.json"
+    cli_policy.write_text("{}", encoding="utf-8")
+    env_policy.write_text("{}", encoding="utf-8")
+
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            code_interpreter="spawn",
+            code_interpreter_port=5971,
+            code_interpreter_workers=0,
+            code_interpreter_egress_policy=str(cli_policy),
+        ),
+        env=EnvSource(
+            environ={
+                "VR_PYODIDE_CACHE_DIR": str(tmp_path / "cache"),
+                "VR_CODE_INTERPRETER_EGRESS_POLICY_PATH": str(env_policy),
+            }
+        ),
+    )
+    assert runtime_config.code_interpreter_egress_policy_path == str(cli_policy.resolve())
+
+    spec = build_serve_spec(runtime_config)
+
+    assert isinstance(spec.code_interpreter, SpawnCodeInterpreterSpec)
+    assert "--egress-policy-file" in spec.code_interpreter.cmd
+    assert spec.code_interpreter.cmd[
+        spec.code_interpreter.cmd.index("--egress-policy-file") + 1
+    ] == str(cli_policy.resolve())
+
+    worker_env = _build_gateway_worker_env(spec=spec, prometheus_multiproc_dir=None)
+    assert worker_env["VR_CODE_INTERPRETER_EGRESS_POLICY_PATH"] == str(cli_policy.resolve())
 
 
 def test_build_serve_spec_code_interpreter_uses_bun_fallback(tmp_path: Path, monkeypatch) -> None:

@@ -1,6 +1,6 @@
 declare var self: Worker;
 
-import { PyodideManager } from "./pyodide-manager";
+import { PyodideManager, PythonRuntimeTerminatedError } from "./pyodide-manager";
 import type { ExecutionResult, PyodideConfig } from "./types";
 
 // Worker-specific message types
@@ -17,6 +17,7 @@ interface WorkerResponse {
   id?: string;
   result?: ExecutionResult;
   error?: string;
+  fatal?: boolean;
 }
 
 interface WorkerInitMessage {
@@ -82,12 +83,22 @@ async function handleExecute(message: WorkerRequest): Promise<void> {
     };
     self.postMessage(response);
   } catch (error: any) {
+    const isFatal = error instanceof PythonRuntimeTerminatedError || error?.name === "PythonRuntimeTerminatedError";
+
     // Send error back to main thread
     const response: WorkerResponse = {
       type: "error",
+      workerId,
       id: message.id,
       error: error.message || "Execution failed",
+      fatal: isFatal,
     };
     self.postMessage(response);
+
+    if (isFatal) {
+      // Terminate the poisoned worker after reporting the fatal execution
+      // error so the main thread can respawn a clean runtime.
+      (self as unknown as { close?: () => void }).close?.();
+    }
   }
 }

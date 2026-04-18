@@ -27,6 +27,8 @@ def test_build_integrated_serve_spec_strips_responses_flags_and_uses_cli_values(
             "3",
             "--responses-code-interpreter-startup-timeout",
             "42",
+            "--responses-code-interpreter-egress-policy",
+            "/tmp/egress-policy.json",
             "--responses-mcp-config",
             "/tmp/mcp.json",
             "--responses-mcp-port",
@@ -52,6 +54,7 @@ def test_build_integrated_serve_spec_strips_responses_flags_and_uses_cli_values(
     assert spec.code_interpreter_port == 6111
     assert spec.code_interpreter_workers == 3
     assert spec.code_interpreter_startup_timeout_s == 42.0
+    assert spec.code_interpreter_egress_policy_path == "/tmp/egress-policy.json"
     assert spec.mcp_config_path == "/tmp/mcp.json"
     assert spec.mcp_port == 6201
 
@@ -68,6 +71,21 @@ def test_build_integrated_serve_spec_uses_builtin_defaults_when_flags_omitted() 
     assert spec.code_interpreter_port == 5970
     assert spec.code_interpreter_workers == 0
     assert spec.code_interpreter_startup_timeout_s == 600.0
+    assert spec.code_interpreter_egress_policy_path is None
+
+
+def test_build_integrated_serve_spec_accepts_hyphenated_chat_completions_alias() -> None:
+    spec = build_integrated_serve_spec(
+        [
+            "serve",
+            "model",
+            "--responses",
+            "--responses-upstream-api-kind",
+            "chat-completions",
+        ],
+    )
+
+    assert spec.upstream_api_kind == "chat_completions"
 
 
 def test_build_integrated_serve_spec_rejects_non_serve_commands() -> None:
@@ -88,6 +106,17 @@ def test_build_integrated_serve_spec_rejects_multiple_api_servers() -> None:
 
 
 def test_build_integrated_serve_spec_rejects_invalid_numeric_cli_flag() -> None:
+    with pytest.raises(
+        IntegratedSpecError,
+        match=(
+            r"--responses-upstream-api-kind must be one of "
+            r"\{chat_completions,responses\}"
+        ),
+    ):
+        build_integrated_serve_spec(
+            ["serve", "model", "--responses", "--responses-upstream-api-kind", "chat"],
+        )
+
     with pytest.raises(
         IntegratedSpecError, match=r"invalid --responses-code-interpreter-port='abc'"
     ):
@@ -155,6 +184,7 @@ def test_format_integrated_help_mentions_upstream_vllm_help() -> None:
     help_text = format_integrated_help()
     assert "--responses-upstream-api-kind" in help_text
     assert "--responses-web-search-profile" in help_text
+    assert "--responses-code-interpreter-egress-policy" in help_text
     assert "Choices: duckduckgo_plus_fetch, exa_mcp." in help_text
     assert "--responses-mcp-config" in help_text
     assert "--responses-mcp-port" in help_text

@@ -48,6 +48,59 @@ Notes:
 - `2+` enables parallel execution via Bun Workers (experimental).
 - Each worker initializes its own Pyodide runtime, so RAM usage and startup time scale with worker count.
 
+### Code Interpreter Egress Policy
+
+Use a JSON policy file to restrict outbound HTTP/HTTPS requests made by Python code running inside the built-in Code
+Interpreter. Configure it with the CLI flag for your entrypoint:
+
+```bash
+vllm-responses serve \
+  --upstream http://127.0.0.1:8000/v1 \
+  --code-interpreter spawn \
+  --code-interpreter-egress-policy /path/to/egress-policy.json
+```
+
+For integrated `vllm serve --responses`, use:
+
+```bash
+vllm serve <model> \
+  --responses \
+  --responses-code-interpreter-egress-policy /path/to/egress-policy.json
+```
+
+Example policy that allows ordinary public HTTP/HTTPS destinations while blocking direct IP literals and
+internal/special-use networks:
+
+```json
+{
+  "mode": "denylist",
+  "allowed_schemes": ["http", "https"],
+  "block_ip_literals": true,
+  "block_private_networks": true,
+  "rules": []
+}
+```
+
+Policy fields:
+
+- `mode`: `allowlist` or `denylist`. `allowlist` only permits matching destinations. `denylist` permits destinations
+    except those matched by the policy.
+- `allowed_schemes`: permitted URL schemes. Values are `http` and/or `https`.
+- `block_ip_literals`: when `true`, rejects URLs that directly use an IP address instead of a hostname.
+- `block_private_networks`: when `true`, rejects loopback, RFC1918 private networks, link-local/metadata ranges, IPv6
+    unique-local/link-local, multicast, and reserved/special-use destinations.
+- `rules`: host, suffix, or CIDR match rules. This array may be empty when the policy only needs scheme, IP-literal, and
+    internal-network controls.
+
+Rule entries:
+
+- `{"kind": "host", "value": "api.example.com"}` matches one exact hostname after normalization.
+- `{"kind": "suffix", "value": ".example.com"}` matches a DNS suffix. Suffix values must start with `.`.
+- `{"kind": "cidr", "value": "203.0.113.0/24"}` matches resolved destination IPs inside the CIDR range.
+
+The policy applies after Pyodide starts and does not block the host-side Pyodide bootstrap download. It is defense in
+depth, not a replacement for container or network-layer egress controls.
+
 ## MCP Configuration (Built-in + Remote)
 
 | Variable                                | Description                                                                                     | Default |

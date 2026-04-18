@@ -1,18 +1,21 @@
-import { PyodideManager } from "./pyodide-manager";
+import { PyodideManager, PythonRuntimeTerminatedError } from "./pyodide-manager";
 import { WorkerPool } from "./worker-pool";
-import type { ExecuteRequest, HealthResponse } from "./types";
+import type { ExecuteRequest, ExecutionResult, HealthResponse, HealthStatus, PyodideConfig } from "./types";
 
 let pyodideManager: PyodideManager | null = null;
 let workerPool: WorkerPool | null = null;
 let serverConfig: ServerConfig | null = null;
 let serverStartTime = Date.now();
 let server: ReturnType<typeof Bun.serve> | null = null;
+let singleThreadRecovery: Promise<void> | null = null;
+let recoveryHandlersInstalled = false;
 
 interface ServerConfig {
   port: number;
   resetGlobals: boolean;
   pyodideCache: string;
   workerCount: number;
+  egressPolicyFile?: string;
 }
 
 export async function startServer(config: ServerConfig) {
@@ -30,18 +33,15 @@ export async function startServer(config: ServerConfig) {
         pyodideCache: config.pyodideCache,
         verbose: true,
         timeout: 30000,
+        egressPolicyFile: config.egressPolicyFile,
       },
     });
     await workerPool.initialize();
   } else {
     // Use single-threaded PyodideManager (backward compatible)
     console.log("Starting in single-threaded mode...");
-    pyodideManager = new PyodideManager({
-      pyodideCache: config.pyodideCache,
-      verbose: true,
-      timeout: 30000,
-    });
-    await pyodideManager.initialize();
+    await initializeSingleThreadManager(config);
+    setupRuntimeRecoveryHandlers();
   }
 
   console.log("Execution environment ready");
@@ -86,12 +86,7 @@ export async function startServer(config: ServerConfig) {
 }
 
 async function handleHealth(headers: Record<string, string>): Promise<Response> {
-  const health: HealthResponse = {
-    status: "healthy",
-    pyodide_loaded: workerPool ? workerPool.pyodideLoaded() : pyodideManager !== null,
-    uptime_seconds: Math.floor((Date.now() - serverStartTime) / 1000),
-    execution_count: workerPool?.getExecutionCount() || pyodideManager?.getExecutionCount() || 0,
-  };
+  const health = workerPool ? buildWorkerHealth() : buildSingleThreadHealth();
 
   return Response.json(health, { headers });
 }
@@ -105,15 +100,23 @@ async function handleExecute(req: Request, defaultResetGlobals: boolean, headers
       return Response.json({ status: "error", error: 'Missing or invalid "code" field' }, { status: 400, headers });
     }
 
-    // IMPORTANT: Multiple workers (>1) always use reset_globals=true
-    const resetGlobals = config.workerCount > 1 ? true : (body.reset_globals ?? defaultResetGlobals);
+    // Worker-pool mode does not provide stable shared-state semantics because
+    // requests are routed independently, so we always force isolated globals
+    // when `workerCount > 0` even if the request explicitly asks otherwise.
+    const resetGlobals = config.workerCount > 0 ? true : (body.reset_globals ?? defaultResetGlobals);
 
     // Execute via worker pool or manager
-    const result = workerPool ? await workerPool.execute(body.code, resetGlobals) : await pyodideManager!.execute(body.code, resetGlobals);
+    const result = workerPool ? await workerPool.execute(body.code, resetGlobals) : await executeSingleThread(body.code, resetGlobals);
 
     // Always return 200 for Python execution (errors are treated as output)
     return Response.json(result, { status: 200, headers });
   } catch (error: any) {
+    if (isRuntimeTerminationError(error)) {
+      if (!workerPool) {
+        void startSingleThreadRecovery(error);
+      }
+      return buildRuntimeTerminatedResponse(headers);
+    }
     return Response.json(
       {
         status: "error",
@@ -122,6 +125,133 @@ async function handleExecute(req: Request, defaultResetGlobals: boolean, headers
       { status: 500, headers },
     );
   }
+}
+
+function createPyodideConfig(config: ServerConfig): PyodideConfig {
+  return {
+    pyodideCache: config.pyodideCache,
+    verbose: true,
+    timeout: 30000,
+    egressPolicyFile: config.egressPolicyFile,
+  };
+}
+
+async function initializeSingleThreadManager(config: ServerConfig): Promise<void> {
+  pyodideManager = new PyodideManager(createPyodideConfig(config));
+  await pyodideManager.initialize();
+}
+
+async function executeSingleThread(code: string, resetGlobals: boolean): Promise<ExecutionResult> {
+  if (singleThreadRecovery || !pyodideManager) {
+    throw new PythonRuntimeTerminatedError();
+  }
+  return pyodideManager.execute(code, resetGlobals);
+}
+
+function buildRuntimeTerminatedResponse(headers: Record<string, string>): Response {
+  return Response.json(
+    {
+      status: "error",
+      error: "Python runtime terminated",
+    },
+    { status: 500, headers },
+  );
+}
+
+function isRuntimeTerminationError(error: unknown): boolean {
+  if (error instanceof PythonRuntimeTerminatedError) {
+    return true;
+  }
+  const e = error as {
+    name?: unknown;
+    message?: unknown;
+    stack?: unknown;
+  };
+  const combined = [e?.name, e?.message, e?.stack].map((value) => String(value ?? "")).join("\n");
+  return combined.includes("PythonRuntimeTerminatedError") || combined.includes("Python runtime terminated") || combined.includes("SystemExit");
+}
+
+function looksLikePyodideRuntimeEscape(error: unknown): boolean {
+  const e = error as {
+    message?: unknown;
+    stack?: unknown;
+  };
+  const combined = [e?.message, e?.stack].map((value) => String(value ?? "")).join("\n");
+  return combined.includes("SystemExit") || combined.includes("Python runtime terminated");
+}
+
+function setupRuntimeRecoveryHandlers(): void {
+  if (recoveryHandlersInstalled) {
+    return;
+  }
+  recoveryHandlersInstalled = true;
+
+  const handleEscape = (kind: "uncaughtException" | "unhandledRejection", error: unknown) => {
+    if (serverConfig?.workerCount === 0 && looksLikePyodideRuntimeEscape(error)) {
+      console.error(`Recovered ${kind} from poisoned Pyodide runtime; recycling runtime...`, error);
+      void startSingleThreadRecovery(error);
+      return;
+    }
+
+    console.error(`Unhandled ${kind}:`, error);
+    process.exit(1);
+  };
+
+  process.on("uncaughtException", (error) => {
+    handleEscape("uncaughtException", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    handleEscape("unhandledRejection", reason);
+  });
+}
+
+async function startSingleThreadRecovery(reason: unknown): Promise<void> {
+  if (!serverConfig || singleThreadRecovery) {
+    return singleThreadRecovery ?? Promise.resolve();
+  }
+
+  console.error("Single-threaded Pyodide runtime terminated; starting recovery...", reason);
+  pyodideManager = null;
+
+  singleThreadRecovery = (async () => {
+    const manager = new PyodideManager(createPyodideConfig(serverConfig!));
+    await manager.initialize();
+    pyodideManager = manager;
+    console.log("Single-threaded Pyodide runtime recovered");
+  })()
+    .catch((error) => {
+      console.error("Single-threaded Pyodide runtime recovery failed:", error);
+      pyodideManager = null;
+    })
+    .finally(() => {
+      singleThreadRecovery = null;
+    });
+
+  return singleThreadRecovery;
+}
+
+function buildSingleThreadHealth(): HealthResponse {
+  const status: HealthStatus = singleThreadRecovery ? "unhealthy" : pyodideManager ? "healthy" : "unhealthy";
+  return {
+    status,
+    pyodide_loaded: status === "healthy",
+    uptime_seconds: Math.floor((Date.now() - serverStartTime) / 1000),
+    execution_count: pyodideManager?.getExecutionCount() || 0,
+  };
+}
+
+function buildWorkerHealth(): HealthResponse {
+  const readyWorkerCount = workerPool?.getReadyWorkerCount() || 0;
+  const configuredWorkerCount = workerPool?.getConfiguredWorkerCount() || serverConfig?.workerCount || 0;
+  const status: HealthStatus = readyWorkerCount === 0 ? "unhealthy" : readyWorkerCount === configuredWorkerCount ? "healthy" : "degraded";
+  return {
+    status,
+    pyodide_loaded: readyWorkerCount > 0,
+    uptime_seconds: Math.floor((Date.now() - serverStartTime) / 1000),
+    execution_count: workerPool?.getExecutionCount() || 0,
+    ready_worker_count: readyWorkerCount,
+    configured_worker_count: configuredWorkerCount,
+  };
 }
 
 function setupShutdownHandlers() {

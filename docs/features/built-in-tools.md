@@ -19,6 +19,10 @@ The Code Interpreter allows the model to write and execute Python code in a sand
 - String manipulation
 - Solving logic puzzles
 
+Hosted code-interpreter calls are isolated by default: each tool execution gets
+fresh top-level globals, while the underlying runtime may still reuse the same
+interpreter instance between calls.
+
 ### Enabling the Tool
 
 To use the code interpreter, you must:
@@ -84,13 +88,34 @@ The code interpreter runs in a sandboxed environment:
     service. On Linux x86_64 wheels, the server is bundled as a native binary; for development/source installs it can run
     via [Bun](https://bun.sh/).
 - **Isolation**: Runs in a WebAssembly sandbox with no direct host file system access.
-- **Network Access**: HTTP requests are available via `httpx` (useful for API calls, data fetching).
+- **Network Access**: HTTP requests are available through the supported Python HTTP libraries. Operators can restrict
+    outbound HTTP/HTTPS destinations with `--code-interpreter-egress-policy` or
+    `--responses-code-interpreter-egress-policy`.
 - **Resource Limits**: Execution time is capped (configurable via startup flags).
 
 !!! note "First start download"
 
     If the tool is enabled, the first start may download the Pyodide runtime (~400MB) into a cache directory and extract
     it. You can control the cache location via `VR_PYODIDE_CACHE_DIR`.
+
+    The egress policy applies to Python HTTP/HTTPS requests made inside the Code Interpreter runtime. It does not block
+    the host-side Pyodide bootstrap download.
+
+!!! note "Egress policy"
+
+    Set `--code-interpreter-egress-policy /path/to/policy.json` under `vllm-responses serve`, or
+    `--responses-code-interpreter-egress-policy /path/to/policy.json` under integrated `vllm serve --responses`, to
+    enforce a deployment-scoped outbound HTTP/HTTPS policy for Python code executed by the built-in Code Interpreter.
+    The policy supports `allowlist` and `denylist` modes with exact host, suffix, and CIDR rules, plus blocking for IP
+    literals and private/special-use networks.
+    `rules` may be empty, which is useful for a denylist policy that only blocks IP literals and internal/special-use
+    networks.
+
+    Use the CLI flag for normal gateway startup.
+
+    This policy is defense in depth. Deployments that require strong protection against internal network access should
+    still enforce network-layer controls such as container network policy, VPC/firewall egress rules, or an outbound
+    proxy.
 
 !!! note "Concurrency"
 
@@ -99,7 +124,8 @@ The code interpreter runs in a sandboxed environment:
     `--responses-code-interpreter-workers` in integrated mode. This uses [Bun Workers
     **experimental**](https://bun.com/docs/runtime/workers). Use `2+` for actual parallelism; `1` enables worker mode
     but does not increase throughput. Each worker loads its own Pyodide runtime, so higher worker counts increase RAM
-    usage and startup time.
+    usage and startup time. Worker mode always runs executions with fresh globals; it does not provide shared-state
+    semantics across requests.
 
 !!! warning "Production Deployment"
 

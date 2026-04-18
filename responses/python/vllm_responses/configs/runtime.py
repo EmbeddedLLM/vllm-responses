@@ -32,6 +32,7 @@ class RuntimeConfig:
     pyodide_cache_dir: str | None
     code_interpreter_dev_bun_fallback: bool
     code_interpreter_startup_timeout_s: float
+    code_interpreter_egress_policy_path: str | None
 
     upstream_ready_timeout_s: float
     upstream_ready_interval_s: float

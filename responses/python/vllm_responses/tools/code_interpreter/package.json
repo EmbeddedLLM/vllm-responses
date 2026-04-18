@@ -4,7 +4,7 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "bun build --compile --minify src/index.ts --outfile woma"
+    "build": "bun build --compile src/index.ts worker.ts --outfile woma"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -17,6 +17,10 @@ from vllm_responses.tools.profile_resolution import (
 from vllm_responses.tools.web_search.profiles import get_web_search_profile_ids
 
 _SUPPORTED_CODE_INTERPRETER_MODES = "{spawn,external,disabled}"
+_SUPPORTED_UPSTREAM_API_KINDS = "{chat_completions,responses}"
+_UPSTREAM_API_KIND_ALIASES = {
+    "chat-completions": "chat_completions",
+}
 
 
 def format_web_search_profile_choices() -> str:
@@ -49,7 +53,7 @@ RESPONSES_CLI_FLAG_SPECS = (
         supervisor_flag="--upstream-api-kind",
         supervisor_dest="upstream_api_kind",
         integrated_flag="--responses-upstream-api-kind",
-        metavar="{chat_completions,responses}",
+        metavar=_SUPPORTED_UPSTREAM_API_KINDS,
         help=(
             "External upstream transport kind. "
             "Use `chat_completions` for `/v1/chat/completions` or `responses` for `/v1/responses`."
@@ -99,6 +103,14 @@ RESPONSES_CLI_FLAG_SPECS = (
         help="Maximum time to wait for the code interpreter readiness check.",
     ),
     ResponsesCliFlagSpec(
+        field_name="code_interpreter_egress_policy_path",
+        supervisor_flag="--code-interpreter-egress-policy",
+        supervisor_dest="code_interpreter_egress_policy",
+        integrated_flag="--responses-code-interpreter-egress-policy",
+        metavar="PATH",
+        help="JSON policy file for code-interpreter outbound HTTP/HTTPS egress.",
+    ),
+    ResponsesCliFlagSpec(
         field_name="upstream_ready_timeout_s",
         supervisor_flag="--upstream-ready-timeout",
         supervisor_dest="upstream_ready_timeout",
@@ -142,6 +154,7 @@ class ResponsesCliArgs(BaseModel):
     code_interpreter_port: int | None = None
     code_interpreter_workers: int | None = None
     code_interpreter_startup_timeout_s: float | None = None
+    code_interpreter_egress_policy_path: str | None = None
     upstream_ready_timeout_s: float | None = None
     upstream_ready_interval_s: float | None = None
     mcp_config_path: str | None = None
@@ -154,7 +167,9 @@ class ResponsesCliArgs(BaseModel):
             return None
         if isinstance(value, str):
             stripped = value.strip().lower()
-            return stripped or None
+            if not stripped:
+                return None
+            return _UPSTREAM_API_KIND_ALIASES.get(stripped, stripped)
         return value
 
     @field_validator("code_interpreter_mode", mode="before")
@@ -183,9 +198,9 @@ class ResponsesCliArgs(BaseModel):
             return None if not stripped else stripped
         return value
 
-    @field_validator("mcp_config_path", mode="before")
+    @field_validator("code_interpreter_egress_policy_path", "mcp_config_path", mode="before")
     @classmethod
-    def _normalize_mcp_config_path(cls, value: object) -> object:
+    def _normalize_optional_path(cls, value: object) -> object:
         if value is None:
             return None
         if isinstance(value, str):
@@ -241,6 +256,7 @@ class ResolvedIntegratedResponsesCli:
     code_interpreter_port: int
     code_interpreter_workers: int
     code_interpreter_startup_timeout_s: float
+    code_interpreter_egress_policy_path: str | None
     mcp_config_path: str | None
     mcp_port: int | None
 
@@ -254,6 +270,7 @@ def add_supervisor_responses_cli_arguments(parser: argparse.ArgumentParser) -> N
             dest=spec.supervisor_dest,
             type=str,
             default=None,
+            metavar=spec.metavar,
             help=spec.help,
         )
 
@@ -365,6 +382,9 @@ def resolve_integrated_responses_cli(
             if integrated_raw_values["code_interpreter_startup_timeout_s"] is not None
             else str(RUNTIME_DEFAULTS.code_interpreter_startup_timeout_s)
         ),
+        "code_interpreter_egress_policy_path": integrated_raw_values[
+            "code_interpreter_egress_policy_path"
+        ],
         "mcp_config_path": integrated_raw_values["mcp_config_path"],
         "mcp_port": integrated_raw_values["mcp_port"],
     }
@@ -394,6 +414,7 @@ def resolve_integrated_responses_cli(
         code_interpreter_port=int(code_interpreter_port),
         code_interpreter_workers=int(code_interpreter_workers),
         code_interpreter_startup_timeout_s=float(code_interpreter_startup_timeout_s),
+        code_interpreter_egress_policy_path=responses_cli.code_interpreter_egress_policy_path,
         mcp_config_path=responses_cli.mcp_config_path,
         mcp_port=responses_cli.mcp_port,
     )
@@ -413,6 +434,9 @@ def _format_responses_cli_error(
 
     if field_name == "code_interpreter_mode" and error["type"] == "literal_error":
         return f"{error_prefix} error: {label} must be one of {_SUPPORTED_CODE_INTERPRETER_MODES}."
+
+    if field_name == "upstream_api_kind" and error["type"] == "literal_error":
+        return f"{error_prefix} error: {label} must be one of {_SUPPORTED_UPSTREAM_API_KINDS}."
 
     if (
         field_name == "mcp_port"

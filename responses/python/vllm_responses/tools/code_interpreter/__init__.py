@@ -92,6 +92,13 @@ def _get_spawn_command(
             "--pyodide-cache",
             pyodide_cache_dir,
         ]
+        if runtime_config.code_interpreter_egress_policy_path is not None:
+            argv.extend(
+                [
+                    "--egress-policy-file",
+                    runtime_config.code_interpreter_egress_policy_path,
+                ]
+            )
         if workers > 0:
             argv.extend(["--workers", str(workers)])
         return argv, str(code_interpreter_dir)
@@ -115,6 +122,13 @@ def _get_spawn_command(
             "--pyodide-cache",
             pyodide_cache_dir,
         ]
+        if runtime_config.code_interpreter_egress_policy_path is not None:
+            argv.extend(
+                [
+                    "--egress-policy-file",
+                    runtime_config.code_interpreter_egress_policy_path,
+                ]
+            )
         if workers > 0:
             argv.extend(["--workers", str(workers)])
         return argv, str(code_interpreter_dir)
@@ -251,10 +265,10 @@ async def run_code(code: str) -> str:
     transport = getattr(HTTP_ACLIENT, "_transport", None)
     try:
         if isinstance(transport, httpx.ASGITransport):
-            response = await HTTP_ACLIENT.post(url, json={"code": code})
+            response = await HTTP_ACLIENT.post(url, json={"code": code, "reset_globals": True})
         else:
             async with get_async_client() as client:
-                response = await client.post(url, json={"code": code})
+                response = await client.post(url, json={"code": code, "reset_globals": True})
         return response.text
     except Exception:
         errored = True

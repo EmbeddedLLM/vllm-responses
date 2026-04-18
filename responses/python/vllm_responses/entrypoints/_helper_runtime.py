@@ -114,6 +114,13 @@ def build_code_interpreter_spawn_spec(
             "--pyodide-cache",
             pyodide_cache_dir,
         ]
+        if runtime_config.code_interpreter_egress_policy_path is not None:
+            cmd.extend(
+                [
+                    "--egress-policy-file",
+                    runtime_config.code_interpreter_egress_policy_path,
+                ]
+            )
         if (runtime_config.code_interpreter_workers or 0) > 0:
             cmd.extend(["--workers", str(runtime_config.code_interpreter_workers)])
     elif (
@@ -137,6 +144,13 @@ def build_code_interpreter_spawn_spec(
             "--pyodide-cache",
             pyodide_cache_dir,
         ]
+        if runtime_config.code_interpreter_egress_policy_path is not None:
+            cmd.extend(
+                [
+                    "--egress-policy-file",
+                    runtime_config.code_interpreter_egress_policy_path,
+                ]
+            )
         if (runtime_config.code_interpreter_workers or 0) > 0:
             cmd.extend(["--workers", str(runtime_config.code_interpreter_workers)])
     else:

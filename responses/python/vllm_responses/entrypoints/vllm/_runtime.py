@@ -383,6 +383,7 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
             code_interpreter_port=spec.code_interpreter_port,
             code_interpreter_workers=spec.code_interpreter_workers,
             code_interpreter_startup_timeout_s=spec.code_interpreter_startup_timeout_s,
+            code_interpreter_egress_policy_path=spec.code_interpreter_egress_policy_path,
             mcp_config_path=spec.mcp_config_path,
             mcp_builtin_runtime_url=cli_mcp_runtime_url,
         )

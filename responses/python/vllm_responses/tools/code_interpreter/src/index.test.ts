@@ -1,26 +1,17 @@
-import { expect, test } from "bun:test";
+import { test } from "bun:test";
+
+import { PYODIDE_CACHE_DIR, buildCompiledBinary } from "./test-utils";
 
 test("compiled REPL integration test", async () => {
-  const fs = require("fs");
-  const path = require("path");
-
   // Build the compiled binary
   console.log("Building compiled REPL...");
-  const buildProc = Bun.spawn(["bun", "run", "build"], {
-    cwd: process.cwd(),
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  const buildExitCode = await buildProc.exited;
-  expect(buildExitCode).toBe(0);
+  const binaryPath = await buildCompiledBinary(process.cwd());
   console.log("Build completed");
 
   // Test the compiled binary
   console.log("Testing compiled REPL...");
-  const binaryPath = path.join(process.cwd(), "woma");
-  expect(fs.existsSync(binaryPath)).toBe(true);
 
-  const replProc = Bun.spawn([binaryPath], {
+  const replProc = Bun.spawn([binaryPath, "--pyodide-cache", PYODIDE_CACHE_DIR], {
     cwd: process.cwd(),
     stdin: "pipe",
     stdout: "pipe",
@@ -76,16 +67,22 @@ test("compiled REPL integration test", async () => {
   await Bun.sleep(100); // Give it a moment to process
   const output1 = await waitForPrompt();
   console.log("Test 1+1 output:", output1);
-  expect(output1).toContain("2");
+  if (!output1.includes("2")) {
+    throw new Error(`Expected REPL output to contain 2, got: ${output1}`);
+  }
 
-  // Test 2: httpx.get
-  replProc.stdin.write(
-    'httpx.get("https://raw.githubusercontent.com/EmbeddedLLM/JamAIBase/refs/heads/main/services/api/tests/files/txt/weather.txt").text\n',
-  );
+  // Test 2: state persists across REPL commands
+  replProc.stdin.write("x = 21\n");
   await Bun.sleep(100); // Give it a moment to process
-  const output2 = await waitForPrompt(30000); // Longer timeout for HTTP request
-  console.log("Test httpx output:", output2);
-  expect(output2).toContain("Temperature in Kuala Lumpur is 27 degrees celsius");
+  await waitForPrompt();
+
+  replProc.stdin.write("x * 2\n");
+  await Bun.sleep(100);
+  const output2 = await waitForPrompt();
+  console.log("Test stateful REPL output:", output2);
+  if (!output2.includes("42")) {
+    throw new Error(`Expected REPL output to contain 42, got: ${output2}`);
+  }
 
   // Cleanup: close the process
   replProc.kill();

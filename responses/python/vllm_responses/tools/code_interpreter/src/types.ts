@@ -2,7 +2,10 @@ export interface PyodideConfig {
   pyodideCache: string;
   verbose?: boolean;
   timeout?: number;
+  egressPolicyFile?: string;
 }
+
+export type HealthStatus = "healthy" | "degraded" | "unhealthy";
 
 export interface ExecutionResult {
   status: "success" | "exception" | "error";
@@ -28,10 +31,12 @@ export interface ExecuteRequest {
 }
 
 export interface HealthResponse {
-  status: "healthy";
+  status: HealthStatus;
   pyodide_loaded: boolean;
   uptime_seconds: number;
   execution_count: number;
+  ready_worker_count?: number;
+  configured_worker_count?: number;
 }
 
 // Worker message types
@@ -48,6 +53,7 @@ export interface WorkerResponse {
   id?: string;
   result?: ExecutionResult;
   error?: string;
+  fatal?: boolean;
 }
 
 export interface WorkerInitMessage {

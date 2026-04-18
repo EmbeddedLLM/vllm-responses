@@ -5,6 +5,7 @@ import { PyodideManager } from "./pyodide-manager";
 interface REPLConfig {
   resetGlobals: boolean;
   pyodideCache: string;
+  egressPolicyFile?: string;
 }
 
 export async function startREPL(config: REPLConfig) {
@@ -13,6 +14,7 @@ export async function startREPL(config: REPLConfig) {
     const manager = new PyodideManager({
       pyodideCache: config.pyodideCache,
       verbose: true,
+      egressPolicyFile: config.egressPolicyFile,
     });
     await manager.initialize();
 

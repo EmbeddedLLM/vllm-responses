@@ -22,6 +22,7 @@ class RuntimeDefaults:
     code_interpreter_workers: int = 0
     code_interpreter_dev_bun_fallback: bool = False
     code_interpreter_startup_timeout_s: float = 10 * 60.0
+    code_interpreter_egress_policy_path: str | None = None
     upstream_ready_timeout_s: float = 30 * 60.0
     upstream_ready_interval_s: float = 5.0
 

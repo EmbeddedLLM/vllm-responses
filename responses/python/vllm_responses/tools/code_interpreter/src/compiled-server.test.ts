@@ -1,7 +1,7 @@
 import type { Subprocess } from "bun";
 import { test } from "bun:test";
 
-import { PYODIDE_CACHE_DIR, assertStartupAndExecution } from "./test-utils";
+import { PYODIDE_CACHE_DIR, assertStartupAndExecution, buildCompiledBinary } from "./test-utils";
 
 interface RuntimeShape {
   name: string;
@@ -9,23 +9,25 @@ interface RuntimeShape {
   workers: number;
 }
 
-const SOURCE_RUNTIME_SHAPES: RuntimeShape[] = [
-  { name: "source server workers=0", port: 8765, workers: 0 },
-  { name: "source server workers=2", port: 8766, workers: 2 },
+const COMPILED_RUNTIME_SHAPES: RuntimeShape[] = [
+  { name: "compiled server workers=0", port: 8775, workers: 0 },
+  { name: "compiled server workers=2", port: 8776, workers: 2 },
 ];
 
-for (const shape of SOURCE_RUNTIME_SHAPES) {
+for (const shape of COMPILED_RUNTIME_SHAPES) {
   test(`startup + execution smoke: ${shape.name}`, async () => {
     let serverProc: Subprocess | null = null;
     const serverUrl = `http://localhost:${shape.port}`;
+    const binaryPath = await buildCompiledBinary(process.cwd());
 
     try {
-      const cmd = ["bun", "src/index.ts", "--port", String(shape.port), "--pyodide-cache", PYODIDE_CACHE_DIR];
+      const cmd = [binaryPath, "--port", String(shape.port), "--pyodide-cache", PYODIDE_CACHE_DIR];
       if (shape.workers > 0) {
         cmd.push("--workers", String(shape.workers));
       }
 
       serverProc = Bun.spawn(cmd, {
+        cwd: process.cwd(),
         stdout: "inherit",
         stderr: "inherit",
       });
@@ -37,5 +39,5 @@ for (const shape of SOURCE_RUNTIME_SHAPES) {
         await serverProc.exited;
       }
     }
-  }, 120000);
+  }, 180000);
 }

@@ -67,6 +67,13 @@ def _build_gateway_worker_env(
     else:
         gateway_env.pop("VR_MCP_CONFIG_PATH", None)
 
+    if runtime_config.code_interpreter_egress_policy_path is not None:
+        gateway_env["VR_CODE_INTERPRETER_EGRESS_POLICY_PATH"] = (
+            runtime_config.code_interpreter_egress_policy_path
+        )
+    else:
+        gateway_env.pop("VR_CODE_INTERPRETER_EGRESS_POLICY_PATH", None)
+
     if spec.mcp_runtime is not None:
         gateway_env["VR_MCP_BUILTIN_RUNTIME_URL"] = (
             f"http://{spec.mcp_runtime.host}:{spec.mcp_runtime.port}"

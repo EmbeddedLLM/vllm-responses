@@ -27,6 +27,11 @@ jobs:
           version: "0.8.14"
           enable-cache: true
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
       - name: Build docs
         working-directory: responses
         run: |
@@ -34,7 +39,7 @@ jobs:
           uv run --no-sync mkdocs build --strict -f ../mkdocs.yml
 
   pytest:
-    name: Pytest
+    name: Tests (Python + code interpreter)
     runs-on: ubuntu-latest
     env:
       VR_PYODIDE_CACHE_DIR: ~/.cache/vllm-responses/pyodide
@@ -54,6 +59,11 @@ jobs:
           version: "0.8.14"
           enable-cache: true
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
       - name: Cache Pyodide runtime
         uses: actions/cache@v4
         with:
@@ -72,6 +82,10 @@ jobs:
         run: |
           bash scripts/ci/prebuild_code_interpreter_linux_x86_64.sh responses
 
-      - name: Run tests
+      - name: Run code interpreter Bun tests
+        working-directory: responses/python/vllm_responses/tools/code_interpreter
+        run: bun test
+
+      - name: Run Python pytest
         working-directory: responses
         run: uv run --no-sync pytest -q

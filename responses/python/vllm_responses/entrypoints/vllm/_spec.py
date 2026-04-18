@@ -25,6 +25,7 @@ class IntegratedServeSpec:
     code_interpreter_port: int
     code_interpreter_workers: int
     code_interpreter_startup_timeout_s: float
+    code_interpreter_egress_policy_path: str | None = None
     upstream_api_kind: UpstreamAPIKind = "chat_completions"
     mcp_config_path: str | None = None
     mcp_port: int | None = None
@@ -87,6 +88,7 @@ def build_integrated_serve_spec(raw_args: list[str]) -> IntegratedServeSpec:
         code_interpreter_port=resolved_cli.code_interpreter_port,
         code_interpreter_workers=resolved_cli.code_interpreter_workers,
         code_interpreter_startup_timeout_s=resolved_cli.code_interpreter_startup_timeout_s,
+        code_interpreter_egress_policy_path=resolved_cli.code_interpreter_egress_policy_path,
         mcp_config_path=resolved_cli.mcp_config_path,
         mcp_port=resolved_cli.mcp_port,
     )

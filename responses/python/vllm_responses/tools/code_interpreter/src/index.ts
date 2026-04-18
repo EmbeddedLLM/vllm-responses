@@ -10,10 +10,11 @@ function parseArgs() {
   // compiled binary => Bun.argv == ["<exe>", ...]
   const startIndex = Bun.argv.length >= 2 && Bun.argv[1]?.endsWith(".ts") ? 2 : 1;
   const args = Bun.argv.slice(startIndex);
-  let resetGlobals = false;
+  let resetGlobals: boolean | null = null;
   let pyodideCache = join(homedir(), ".pyodide-env");
   let port: number | null = null;
   let workerCount = 0; // Default 0 = single-threaded
+  let egressPolicyFile: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--reset-globals") {
@@ -57,25 +58,41 @@ function parseArgs() {
         console.error("Error: --workers flag requires a number.");
         process.exit(1);
       }
+    } else if (args[i] === "--egress-policy-file") {
+      i++;
+      const policyPath = args[i];
+      if (policyPath) {
+        egressPolicyFile = policyPath;
+      } else {
+        console.error("Error: --egress-policy-file flag requires a path.");
+        process.exit(1);
+      }
     }
   }
 
-  return { resetGlobals, pyodideCache, port, workerCount };
+  return { resetGlobals, pyodideCache, port, workerCount, egressPolicyFile };
 }
 
-const { resetGlobals, pyodideCache, port, workerCount } = parseArgs();
+const { resetGlobals, pyodideCache, port, workerCount, egressPolicyFile } = parseArgs();
 
 async function main() {
   if (port !== null) {
     // Start server mode
-    await startServer({ port, resetGlobals, pyodideCache, workerCount });
+    await startServer({
+      port,
+      // HTTP server mode is isolated by default; REPL semantics remain unchanged.
+      resetGlobals: resetGlobals ?? true,
+      pyodideCache,
+      workerCount,
+      egressPolicyFile,
+    });
   } else {
     if (workerCount > 0) {
       console.error("Error: --workers flag only supported in server mode (use --port).");
       process.exit(1);
     }
     // Start REPL mode
-    await startREPL({ resetGlobals, pyodideCache });
+    await startREPL({ resetGlobals: resetGlobals ?? false, pyodideCache, egressPolicyFile });
   }
 }
 

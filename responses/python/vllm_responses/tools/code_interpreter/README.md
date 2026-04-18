@@ -138,15 +138,18 @@ bun src/index.ts --port 3000 --workers 4
 
 **Behavior:**
 
-- With 1 worker: Executions respect the `reset_globals` flag (no parallelism)
-- With 2+ workers: All code executions automatically use `reset_globals=true` for predictable, isolated execution
+- With 1+ workers: All code executions automatically use `reset_globals=true`
+  for predictable, isolated execution
 - Each worker maintains its own independent Python environment
 - Requests are randomly distributed across available workers
+- Because worker-mode requests are routed independently, `reset_globals=false`
+  shared-state semantics are only supported in single-threaded server mode and
+  REPL mode
 
 **Worker Count Guidelines:**
 
 - `0` (default): Single-threaded mode, lowest memory (~500MB)
-- `1`: Single worker mode, allows stateful execution with `reset_globals=false` (~500MB)
+- `1`: Worker mode without throughput gains, but still isolated per execution (~500MB)
 - `2-4`: Parallel execution for moderate concurrent load (~1-2GB)
 - `8+`: High concurrent load, requires significant RAM (~4GB+)
 
@@ -158,7 +161,10 @@ bun src/index.ts --port 3000 --workers 4
 
 ## HTTP API Server Mode
 
-When started with the `--port` flag, the application runs as an HTTP API server that executes Python code via REST endpoints. Pyodide is initialized once as a global singleton to avoid cold start issues.
+When started with the `--port` flag, the application runs as an HTTP API
+server that executes Python code via REST endpoints. The HTTP server defaults to
+isolated execution (`reset_globals=true` when omitted), while REPL mode remains
+stateful unless `--reset-globals` is passed.
 
 ### Endpoints
 
@@ -173,9 +179,17 @@ Returns server health status and Pyodide initialization state.
   "status": "healthy",
   "pyodide_loaded": true,
   "uptime_seconds": 3600,
-  "execution_count": 42
+  "execution_count": 42,
+  "ready_worker_count": 2,
+  "configured_worker_count": 2
 }
 ```
+
+`status` can be:
+
+- `healthy`: runtime is fully available
+- `degraded`: worker pool is serving but below configured capacity
+- `unhealthy`: runtime is recovering and cannot currently serve requests
 
 #### `POST /python`
 
@@ -186,12 +200,15 @@ Execute Python code and return the result.
 ```json
 {
   "code": "1 + 1",
-  "reset_globals": false
+  "reset_globals": true
 }
 ```
 
 - `code` (required): Python code to execute
-- `reset_globals` (optional): If `true`, execute in a fresh isolated context. Defaults to server's `--reset-globals` flag setting.
+- `reset_globals` (optional): If `true`, execute in a fresh isolated context.
+  Omitted `reset_globals` defaults to `true` in HTTP server mode.
+- `reset_globals=false` shared-state behavior is only supported in
+  single-threaded server mode. Worker mode always forces isolation.
 
 **Response (200):**
 
@@ -228,6 +245,15 @@ Python errors are returned with `exception` status and with the error message in
   "stderr": "",
   "result": "NameError: name 'x' is not defined",
   "execution_time_ms": 5
+}
+```
+
+Fatal runtime termination is returned as HTTP `500`:
+
+```json
+{
+  "status": "error",
+  "error": "Python runtime terminated"
 }
 ```
 
@@ -274,7 +300,9 @@ curl -X POST http://localhost:3000/python \
 
 ### Build Standalone Binary
 
-Compile the REPL into a single `woma` executable:
+Compile the runtime into a single `woma` executable. The build bundles both the
+main entrypoint and the worker entrypoint so the compiled binary also supports
+server mode with `--workers > 0`:
 
 ```bash
 # Install dependencies
@@ -301,7 +329,8 @@ bun test
 Tests verify:
 
 - Basic Python execution (1+1)
-- HTTP requests with httpx
+- Source server startup/execution in worker and non-worker modes
+- Compiled runtime startup/execution in worker and non-worker modes
 - HTTP API server endpoints (`/health`, `/python`)
 - Error handling and reset_globals functionality
 - Compiled binary functionality

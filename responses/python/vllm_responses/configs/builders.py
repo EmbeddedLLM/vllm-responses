@@ -44,6 +44,17 @@ def resolve_secret(*, env: EnvSource, env_key: str, default: str | None = None) 
     return value or None
 
 
+def resolve_optional_path_env(*, env: EnvSource, env_key: str) -> str | None:
+    value = env.get_optional_str(env_key)
+    return resolve_optional_path(value)
+
+
+def resolve_optional_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return str(Path(value).expanduser().resolve())
+
+
 def resolve_code_interpreter_mode(raw: str) -> CodeInterpreterMode:
     normalized = raw.strip().lower()
     if normalized in {"spawn", "external", "disabled"}:
@@ -84,6 +95,7 @@ def build_common_runtime_config(
     code_interpreter_port: int | None,
     code_interpreter_workers: int | None,
     code_interpreter_startup_timeout_s: float = RUNTIME_DEFAULTS.code_interpreter_startup_timeout_s,
+    code_interpreter_egress_policy_path: str | None = None,
     upstream_ready_timeout_s: float = RUNTIME_DEFAULTS.upstream_ready_timeout_s,
     upstream_ready_interval_s: float = RUNTIME_DEFAULTS.upstream_ready_interval_s,
     mcp_config_path: str | None,
@@ -140,6 +152,14 @@ def build_common_runtime_config(
             RUNTIME_DEFAULTS.code_interpreter_dev_bun_fallback,
         ),
         code_interpreter_startup_timeout_s=float(code_interpreter_startup_timeout_s),
+        code_interpreter_egress_policy_path=(
+            resolve_optional_path(code_interpreter_egress_policy_path)
+            if code_interpreter_egress_policy_path is not None
+            else resolve_optional_path_env(
+                env=env,
+                env_key="VR_CODE_INTERPRETER_EGRESS_POLICY_PATH",
+            )
+        ),
         upstream_ready_timeout_s=float(upstream_ready_timeout_s),
         upstream_ready_interval_s=float(upstream_ready_interval_s),
         mcp_config_path=resolved_mcp_config_path,
@@ -330,6 +350,7 @@ def build_runtime_config_for_supervisor(
             if responses_cli.code_interpreter_startup_timeout_s is None
             else float(responses_cli.code_interpreter_startup_timeout_s)
         ),
+        code_interpreter_egress_policy_path=responses_cli.code_interpreter_egress_policy_path,
         upstream_ready_timeout_s=(
             RUNTIME_DEFAULTS.upstream_ready_timeout_s
             if responses_cli.upstream_ready_timeout_s is None
@@ -356,6 +377,7 @@ def build_runtime_config_for_integrated(
     code_interpreter_port: int,
     code_interpreter_workers: int,
     code_interpreter_startup_timeout_s: float,
+    code_interpreter_egress_policy_path: str | None = None,
     mcp_config_path: str | None,
     mcp_builtin_runtime_url: str | None,
 ) -> RuntimeConfig:
@@ -383,6 +405,7 @@ def build_runtime_config_for_integrated(
         code_interpreter_port=effective_code_interpreter_port,
         code_interpreter_workers=effective_code_interpreter_workers,
         code_interpreter_startup_timeout_s=code_interpreter_startup_timeout_s,
+        code_interpreter_egress_policy_path=code_interpreter_egress_policy_path,
         mcp_config_path=mcp_config_path,
         mcp_builtin_runtime_url=mcp_builtin_runtime_url,
     )

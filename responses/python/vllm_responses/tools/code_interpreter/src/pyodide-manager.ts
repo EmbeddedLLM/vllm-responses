@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { join } from "path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
 import { loadPyodide, type PyodideInterface } from "pyodide";
 import { XMLHttpRequest as OriginalXMLHttpRequest } from "xmlhttprequest-ssl";
+import { enforceEgressPolicySync, hasActiveEgressPolicy, installEgressPolicy } from "./egress_policy";
 import type { ExecutionResult, PyodideConfig } from "./types";
 
 // Keep this pinned to the exact `pyodide` NPM dependency version.
@@ -10,6 +11,7 @@ import type { ExecutionResult, PyodideConfig } from "./types";
 const PYODIDE_VERSION = "0.29.1";
 const TARBALL_NAME = `pyodide-${PYODIDE_VERSION}.tar.bz2`;
 const VERSION_MARKER = ".pyodide_version";
+const SETUP_LOCK_STALE_MS = 10 * 60 * 1000;
 
 function isTarMissingError(error: unknown): boolean {
   const e = error as {
@@ -21,6 +23,38 @@ function isTarMissingError(error: unknown): boolean {
   return (
     combined.includes("enoent") || combined.includes("spawn tar") || combined.includes("tar: not found") || combined.includes("command not found")
   );
+}
+
+async function acquireSetupLock(lockPath: string): Promise<() => void> {
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  while (true) {
+    try {
+      const fd = openSync(lockPath, "wx");
+      return () => {
+        closeSync(fd);
+        rmSync(lockPath, { force: true });
+      };
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+
+      try {
+        const ageMs = Date.now() - statSync(lockPath).mtimeMs;
+        if (ageMs > SETUP_LOCK_STALE_MS) {
+          rmSync(lockPath, { force: true });
+          continue;
+        }
+      } catch (statError: any) {
+        if (statError?.code !== "ENOENT") {
+          throw statError;
+        }
+      }
+
+      await Bun.sleep(250);
+    }
+  }
 }
 
 // XMLHttpRequest polyfill setup
@@ -51,6 +85,22 @@ class WrappedXMLHttpRequest extends OriginalXMLHttpRequest {
   constructor(options?: any) {
     super({ ...options, syncPolicy: "enabled" });
 
+    let requestUrl: string | URL | null = null;
+
+    const originalOpen = this.open;
+    this.open = function (method: string, url: string | URL, async?: boolean, user?: string, password?: string) {
+      requestUrl = url;
+      return originalOpen.call(this, method, url as any, async, user, password);
+    };
+
+    const originalSend = this.send;
+    this.send = function (body?: any) {
+      if (requestUrl !== null && hasActiveEgressPolicy()) {
+        enforceEgressPolicySync(requestUrl);
+      }
+      return originalSend.call(this, body);
+    };
+
     // Patch setRequestHeader on the instance after construction
     const originalSetRequestHeader = this.setRequestHeader;
     this.setRequestHeader = function (header: string, value: string) {
@@ -69,6 +119,24 @@ class WrappedXMLHttpRequest extends OriginalXMLHttpRequest {
 // Install XMLHttpRequest polyfill globally
 (globalThis as any).XMLHttpRequest = WrappedXMLHttpRequest;
 
+export class PythonRuntimeTerminatedError extends Error {
+  constructor(message: string = "Python runtime terminated") {
+    super(message);
+    this.name = "PythonRuntimeTerminatedError";
+  }
+}
+
+function isSystemExitError(error: unknown): boolean {
+  const e = error as {
+    type?: unknown;
+    name?: unknown;
+    message?: unknown;
+    stack?: unknown;
+  };
+  const combined = [e?.type, e?.name, e?.message, e?.stack].map((v) => String(v ?? "")).join("\n");
+  return combined.includes("SystemExit");
+}
+
 export class PyodideManager {
   private pyodide: PyodideInterface | null = null;
   private executionCount = 0;
@@ -76,14 +144,21 @@ export class PyodideManager {
   private config: PyodideConfig;
   private activeStdout: string[] | null = null;
   private activeStderr: string[] | null = null;
+  private poisoned = false;
 
   constructor(config: PyodideConfig) {
     this.config = config;
   }
 
   async initialize(): Promise<void> {
+    this.poisoned = false;
+
     // 1. Setup Pyodide environment
     await this.setupPyodide();
+
+    if (this.config.egressPolicyFile !== undefined) {
+      installEgressPolicy(this.config.egressPolicyFile);
+    }
 
     // 2. Load Pyodide WASM
     if (this.config.verbose) {
@@ -172,6 +247,26 @@ _pyodide._base.eval_code = lambda code: code
 # Patch ctypes
 import ctypes
 ctypes.CDLL = None
+
+# Neutralize common process-termination helpers so they behave like ordinary
+# user-code exceptions rather than host-runtime termination requests.
+import builtins
+import sys
+
+
+class CodeInterpreterExitBlocked(Exception):
+    pass
+
+
+def _blocked_exit(code=None):
+    raise CodeInterpreterExitBlocked(
+        "exit(), quit(), and sys.exit() are disabled in this runtime"
+    )
+
+
+builtins.exit = _blocked_exit
+builtins.quit = _blocked_exit
+sys.exit = _blocked_exit
     `);
 
     if (this.config.verbose) {
@@ -196,6 +291,9 @@ ctypes.CDLL = None
       if (!this.pyodide) {
         throw new Error("Pyodide not initialized");
       }
+      if (this.poisoned) {
+        throw new PythonRuntimeTerminatedError();
+      }
 
       // Create context if reset_globals is enabled
       if (resetGlobals) {
@@ -210,9 +308,18 @@ ctypes.CDLL = None
 
         result = resetGlobals ? await this.pyodide.runPythonAsync(code, { globals: context }) : await this.pyodide.runPythonAsync(code);
       } catch (error: any) {
+        if (isSystemExitError(error)) {
+          this.poisoned = true;
+          throw new PythonRuntimeTerminatedError();
+        }
+
         // Python error - treat as successful execution, return error message
         // Note: we still want to preserve any stdout/stderr produced before the exception.
-        result = this.pyodide.runPython("import sys;repr(sys.last_exc)");
+        try {
+          result = this.pyodide.runPython("import sys;repr(sys.last_exc)");
+        } catch {
+          result = error?.message || String(error);
+        }
         status = "exception";
       } finally {
         this.activeStdout = null;
@@ -257,90 +364,115 @@ ctypes.CDLL = None
     return this.executionCount;
   }
 
+  isPoisoned(): boolean {
+    return this.poisoned;
+  }
+
   private async setupPyodide(): Promise<void> {
     const PYODIDE_ENV_DIR = this.config.pyodideCache;
     const downloadsDir = join(PYODIDE_ENV_DIR, "downloads");
     const tarballPath = join(downloadsDir, TARBALL_NAME);
+    const lockPath = `${PYODIDE_ENV_DIR}.setup.lock`;
+    const releaseSetupLock = await acquireSetupLock(lockPath);
 
-    // Check if pyodide-env directory already exists
-    if (existsSync(PYODIDE_ENV_DIR)) {
-      const versionPath = `${PYODIDE_ENV_DIR}/${VERSION_MARKER}`;
-      try {
-        const installedVersion = readFileSync(versionPath, "utf8").trim();
+    try {
+      // Check under a filesystem lock because multiple workers may initialize against
+      // the same empty cache on first startup.
+      if (existsSync(PYODIDE_ENV_DIR)) {
+        const versionPath = `${PYODIDE_ENV_DIR}/${VERSION_MARKER}`;
+        let installedVersion: string | null = null;
+        try {
+          installedVersion = readFileSync(versionPath, "utf8").trim();
+        } catch {
+          installedVersion = null;
+        }
         if (installedVersion === PYODIDE_VERSION) {
           return;
         }
-        console.log(`Pyodide cache version mismatch: '${installedVersion}' != '${PYODIDE_VERSION}', rebuilding cache...`);
-      } catch {
-        console.log(`Pyodide cache found without version marker, rebuilding cache for '${PYODIDE_VERSION}'...`);
+        if (installedVersion === null) {
+          console.log(`Pyodide cache found without version marker, rebuilding cache for '${PYODIDE_VERSION}'...`);
+        } else {
+          console.log(`Pyodide cache version mismatch: '${installedVersion}' != '${PYODIDE_VERSION}', rebuilding cache...`);
+        }
+        rmSync(PYODIDE_ENV_DIR, { recursive: true, force: true });
       }
-      rmSync(PYODIDE_ENV_DIR, { recursive: true, force: true });
-    }
 
-    if (this.config.verbose) {
-      console.log(`Pyodide environment not found. Setting up Pyodide ${PYODIDE_VERSION}...`);
-    }
-
-    // Fail early with an actionable error instead of downloading hundreds of MB first.
-    try {
-      await Bun.$`tar --version`.quiet();
-    } catch (e: any) {
-      if (isTarMissingError(e)) {
-        throw new Error(
-          "The `tar` executable is required in v1.\n" + "Install it via your system package manager (e.g. `apt-get install -y tar`) and retry.",
-        );
-      }
-      throw e;
-    }
-
-    const downloadUrl = `https://github.com/pyodide/pyodide/releases/download/${PYODIDE_VERSION}/${TARBALL_NAME}`;
-
-    // Ensure cache directories exist before downloading (must never write into CWD).
-    mkdirSync(downloadsDir, { recursive: true });
-
-    // Download tarball if not already present
-    if (!existsSync(tarballPath)) {
       if (this.config.verbose) {
-        console.log(`Downloading ${TARBALL_NAME}...`);
-      }
-      const response = await fetch(downloadUrl);
-
-      if (!response.ok) {
-        throw new Error(`Failed to download Pyodide: ${response.status} ${response.statusText}`);
+        console.log(`Pyodide environment not found. Setting up Pyodide ${PYODIDE_VERSION}...`);
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      await Bun.write(tarballPath, arrayBuffer);
+      // Fail early with an actionable error instead of downloading hundreds of MB first.
+      try {
+        await Bun.$`tar --version`.quiet();
+      } catch (e: any) {
+        if (isTarMissingError(e)) {
+          throw new Error(
+            "The `tar` executable is required in v1.\n" + "Install it via your system package manager (e.g. `apt-get install -y tar`) and retry.",
+          );
+        }
+        throw e;
+      }
+
+      const downloadUrl = `https://github.com/pyodide/pyodide/releases/download/${PYODIDE_VERSION}/${TARBALL_NAME}`;
+
+      // Ensure cache directories exist before downloading (must never write into CWD).
+      mkdirSync(downloadsDir, { recursive: true });
+
+      // Download tarball if not already present. Write to a temporary file first so
+      // another process can never observe a partially written archive.
+      if (!existsSync(tarballPath)) {
+        if (this.config.verbose) {
+          console.log(`Downloading ${TARBALL_NAME}...`);
+        }
+        const response = await fetch(downloadUrl);
+
+        if (!response.ok) {
+          throw new Error(`Failed to download Pyodide: ${response.status} ${response.statusText}`);
+        }
+
+        const tempTarballPath = `${tarballPath}.${process.pid}.${Date.now()}.tmp`;
+        try {
+          const arrayBuffer = await response.arrayBuffer();
+          await Bun.write(tempTarballPath, arrayBuffer);
+          renameSync(tempTarballPath, tarballPath);
+        } catch (e) {
+          rmSync(tempTarballPath, { force: true });
+          throw e;
+        }
+        if (this.config.verbose) {
+          console.log("Download complete.");
+        }
+      } else if (this.config.verbose) {
+        console.log(`${TARBALL_NAME} already exists, skipping download.`);
+      }
+
+      // Create pyodide-env directory
+      mkdirSync(PYODIDE_ENV_DIR, { recursive: true });
+
+      // Extract tarball using tar command
       if (this.config.verbose) {
-        console.log("Download complete.");
+        console.log(`Extracting ${TARBALL_NAME}...`);
       }
-    } else if (this.config.verbose) {
-      console.log(`${TARBALL_NAME} already exists, skipping download.`);
-    }
-
-    // Create pyodide-env directory
-    mkdirSync(PYODIDE_ENV_DIR, { recursive: true });
-
-    // Extract tarball using tar command
-    if (this.config.verbose) {
-      console.log(`Extracting ${TARBALL_NAME}...`);
-    }
-    try {
-      await Bun.$`tar -xjf ${tarballPath} -C ${PYODIDE_ENV_DIR} --strip-components=1`;
-    } catch (e: any) {
-      // Only special-case the "tar executable missing" scenario. Other extraction failures
-      // (corrupt tarball, permission errors, etc.) should surface their real error.
-      if (isTarMissingError(e)) {
-        throw new Error(
-          "Failed to extract Pyodide tarball. The `tar` executable is required in v1.\n" +
-            "Install it via your system package manager (e.g. `apt-get install -y tar`) and retry.",
-        );
+      try {
+        await Bun.$`tar -xjf ${tarballPath} -C ${PYODIDE_ENV_DIR} --strip-components=1`;
+      } catch (e: any) {
+        // Only special-case the "tar executable missing" scenario. Other extraction failures
+        // (corrupt tarball, permission errors, etc.) should surface their real error.
+        if (isTarMissingError(e)) {
+          throw new Error(
+            "Failed to extract Pyodide tarball. The `tar` executable is required in v1.\n" +
+              "Install it via your system package manager (e.g. `apt-get install -y tar`) and retry.",
+          );
+        }
+        rmSync(tarballPath, { force: true });
+        throw e;
       }
-      throw e;
-    }
-    writeFileSync(`${PYODIDE_ENV_DIR}/${VERSION_MARKER}`, `${PYODIDE_VERSION}\n`, "utf8");
-    if (this.config.verbose) {
-      console.log("Extraction complete.");
+      writeFileSync(`${PYODIDE_ENV_DIR}/${VERSION_MARKER}`, `${PYODIDE_VERSION}\n`, "utf8");
+      if (this.config.verbose) {
+        console.log("Extraction complete.");
+      }
+    } finally {
+      releaseSetupLock();
     }
   }
 }
