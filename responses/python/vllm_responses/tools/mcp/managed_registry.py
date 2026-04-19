@@ -6,23 +6,25 @@ from typing import Any
 
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 
-from vllm_responses.mcp.config import McpRuntimeConfig, McpServerRuntimeConfig
-from vllm_responses.mcp.fastmcp_runtime import (
+from vllm_responses.observability.metrics import record_mcp_server_startup
+from vllm_responses.tools.mcp.config import McpRuntimeConfig, McpServerRuntimeConfig
+from vllm_responses.tools.mcp.fastmcp_runtime import (
     build_fastmcp_toolset_from_server_entry,
     extract_mcp_tool_infos,
 )
-from vllm_responses.mcp.types import McpServerInfo, McpToolInfo
-from vllm_responses.mcp.utils import (
+from vllm_responses.tools.mcp.types import McpServerInfo, McpToolInfo
+from vllm_responses.tools.mcp.utils import (
     is_mcp_tool_keyerror,
     redact_and_truncate_error_text,
     truncate_error_text,
 )
-from vllm_responses.observability.metrics import record_mcp_server_startup
 from vllm_responses.utils.exceptions import BadInputError
 
 
 @dataclass(slots=True)
 class _ServerState:
+    """Runtime state for one gateway-managed MCP server."""
+
     config: McpServerRuntimeConfig
     server: AbstractToolset[Any] | None = None
     startup_error: str | None = None
@@ -30,15 +32,22 @@ class _ServerState:
     allowed_mcp_tools_by_name: dict[str, ToolsetTool[Any]] = field(default_factory=dict)
 
 
-class HostedMcpToolNotFoundError(KeyError):
+class ManagedMcpToolNotFoundError(KeyError):
     pass
 
 
-class HostedMcpStaleToolError(KeyError):
+class ManagedMcpStaleToolError(KeyError):
     pass
 
 
-class HostedMCPRegistry:
+class ManagedMCPRegistry:
+    """Materializes and owns gateway-managed MCP servers for the helper runtime.
+
+    This registry is used by the singleton Built-in MCP helper process. It owns
+    configured server toolsets regardless of transport shape: remote HTTP/SSE and
+    local stdio entries are both "managed" because the gateway provisions them.
+    """
+
     def __init__(
         self,
         *,
@@ -181,13 +190,13 @@ class HostedMCPRegistry:
                 tool_name=tool_name,
                 arguments=arguments,
             )
-        except HostedMcpStaleToolError:
+        except ManagedMcpStaleToolError:
             refreshed_tools = await toolset.get_tools(ctx=None)
             refreshed_tool = refreshed_tools.get(tool_name)
             if refreshed_tool is None:
                 state.allowed_mcp_tools_by_name.pop(tool_name, None)
                 state.allowed_tools.pop(tool_name, None)
-                raise HostedMcpToolNotFoundError(tool_name) from None
+                raise ManagedMcpToolNotFoundError(tool_name) from None
 
             # Persist the refreshed handle/info so future calls do not repeatedly refresh.
             state.allowed_mcp_tools_by_name[tool_name] = refreshed_tool
@@ -235,7 +244,7 @@ class HostedMCPRegistry:
 
         mcp_tool = state.allowed_mcp_tools_by_name.get(tool_name)
         if mcp_tool is None:
-            raise HostedMcpToolNotFoundError(tool_name)
+            raise ManagedMcpToolNotFoundError(tool_name)
 
         try:
             return await toolset.call_tool(
@@ -246,7 +255,7 @@ class HostedMCPRegistry:
             )
         except KeyError as exc:
             if is_mcp_tool_keyerror(exc, tool_name):
-                raise HostedMcpStaleToolError(tool_name) from exc
+                raise ManagedMcpStaleToolError(tool_name) from exc
             raise
 
     def _get_state(self, server_label: str) -> _ServerState:

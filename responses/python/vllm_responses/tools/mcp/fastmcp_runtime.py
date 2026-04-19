@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from pydantic_ai.toolsets.abstract import ToolsetTool
 from pydantic_ai.toolsets.fastmcp import FastMCPToolset
 
-from vllm_responses.mcp.types import McpToolInfo
+from vllm_responses.tools.mcp.types import McpToolInfo
 
 try:
     from fastmcp.client import Client
@@ -39,11 +39,7 @@ def build_fastmcp_toolset_from_server_entry(
     )
 
 
-def extract_mcp_tool_infos(
-    tools: dict[str, ToolsetTool[Any]],
-    *,
-    schema_normalizer: Callable[[dict[str, object]], dict[str, object]] | None = None,
-) -> dict[str, McpToolInfo]:
+def extract_mcp_tool_infos(tools: dict[str, ToolsetTool[Any]]) -> dict[str, McpToolInfo]:
     out: dict[str, McpToolInfo] = {}
     for tool_name, tool in sorted(tools.items()):
         if not isinstance(tool_name, str) or not tool_name:
@@ -55,13 +51,8 @@ def extract_mcp_tool_infos(
         )
         if not isinstance(schema_raw, dict):
             input_schema: dict[str, object] = {"type": "__invalid_schema__"}
-        elif schema_normalizer is None:
-            input_schema = schema_raw
         else:
-            try:
-                input_schema = schema_normalizer(dict(schema_raw))
-            except ValueError:
-                input_schema = {"type": "__invalid_schema__"}
+            input_schema = schema_raw
 
         out[tool_name] = McpToolInfo(
             name=tool_name,

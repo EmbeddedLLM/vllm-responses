@@ -12,11 +12,11 @@ from vllm_responses.entrypoints.gateway._app import (
     activate_gateway_runtime,
     augment_standalone_gateway_app,
 )
-from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.observability.tracing import configure_tracing
 from vllm_responses.responses_core.store import get_default_response_store
 from vllm_responses.routers import upstream_proxy
 from vllm_responses.tools.code_interpreter import start_server
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.utils.io import HTTP_ACLIENT
 from vllm_responses.utils.logging import setup_logger_sinks, suppress_logging_handlers
 

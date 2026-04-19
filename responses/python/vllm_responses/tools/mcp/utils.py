@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
-from vllm_responses.mcp.types import McpExecutionResult, McpMode, McpToolRef
+from vllm_responses.tools.mcp.types import McpExecutionResult, McpMode, McpToolRef
 
 HOSTED_MCP_INTERNAL_PREFIX = "mcp__"
 MCP_TOOL_RESULT_KIND = "vllm_responses_mcp_result"
@@ -62,13 +62,11 @@ def sanitize_internal_tool_name(name: str) -> str:
 
 def build_internal_mcp_tool_name(
     *,
-    server_label: str,
-    tool_name: str,
+    ref: McpToolRef,
     existing_map: dict[str, McpToolRef],
 ) -> str:
-    ref = McpToolRef(server_label=server_label, tool_name=tool_name)
     base_name = sanitize_internal_tool_name(
-        f"{HOSTED_MCP_INTERNAL_PREFIX}{server_label}__{tool_name}"
+        f"{HOSTED_MCP_INTERNAL_PREFIX}{ref.server_label}__{ref.tool_name}"
     )
 
     if len(base_name) <= HOSTED_MCP_MAX_TOOL_NAME_LEN:
@@ -77,7 +75,10 @@ def build_internal_mcp_tool_name(
             return base_name
 
     hash_suffix = (
-        "__" + hashlib.sha1(f"{server_label}:{tool_name}".encode("utf-8")).hexdigest()[:10]
+        "__"
+        + hashlib.sha1(
+            f"{ref.mode}:{ref.server_label}:{ref.tool_name}".encode("utf-8")
+        ).hexdigest()[:10]
     )
     prefix_len = HOSTED_MCP_MAX_TOOL_NAME_LEN - len(hash_suffix)
     candidate = base_name[:prefix_len] + hash_suffix

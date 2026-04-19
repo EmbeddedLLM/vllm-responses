@@ -159,7 +159,7 @@ def _get_metrics() -> _GatewayMetrics:
         ),
         mcp_server_startup_total=Counter(
             "vllm_responses_mcp_server_startup_total",
-            "Hosted MCP server startup outcomes.",
+            "Built-in MCP managed server startup outcomes.",
             labelnames=("server_label", "status"),
         ),
     )

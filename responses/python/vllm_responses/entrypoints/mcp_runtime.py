@@ -8,15 +8,18 @@ from pydantic import BaseModel, Field
 
 from vllm_responses.configs.builders import build_runtime_config_for_standalone
 from vllm_responses.configs.sources import EnvSource
-from vllm_responses.mcp.config import load_mcp_runtime_config, merge_mcp_runtime_configs
-from vllm_responses.mcp.hosted_registry import (
-    HostedMCPRegistry,
-    HostedMcpStaleToolError,
-    HostedMcpToolNotFoundError,
-)
-from vllm_responses.mcp.runtime_client import MCP_TOOL_NOT_FOUND_PREFIX
-from vllm_responses.mcp.utils import canonicalize_output_text, redact_and_truncate_error_text
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.config import load_mcp_runtime_config, merge_mcp_runtime_configs
+from vllm_responses.tools.mcp.managed_registry import (
+    ManagedMCPRegistry,
+    ManagedMcpStaleToolError,
+    ManagedMcpToolNotFoundError,
+)
+from vllm_responses.tools.mcp.runtime_client import MCP_TOOL_NOT_FOUND_PREFIX
+from vllm_responses.tools.mcp.utils import (
+    canonicalize_output_text,
+    redact_and_truncate_error_text,
+)
 from vllm_responses.tools.profile_resolution import build_builtin_mcp_runtime_config
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.exceptions import BadInputError
@@ -39,13 +42,13 @@ async def lifespan(app: FastAPI):
         ),
         load_mcp_runtime_config(runtime_config.mcp_config_path),
     )
-    registry = HostedMCPRegistry(
+    registry = ManagedMCPRegistry(
         config=mcp_runtime_config,
         startup_timeout_s=runtime_config.mcp_hosted_startup_timeout_sec,
         tool_timeout_s=runtime_config.mcp_hosted_tool_timeout_sec,
     )
     await registry.startup()
-    app.state.hosted_mcp_registry = registry
+    app.state.managed_mcp_registry = registry
     yield
     await registry.shutdown()
 
@@ -62,8 +65,8 @@ async def add_request_id(request: Request, call_next) -> Response:
     return response
 
 
-def _get_registry() -> HostedMCPRegistry:
-    registry = getattr(app.state, "hosted_mcp_registry", None)
+def _get_registry() -> ManagedMCPRegistry:
+    registry = getattr(app.state, "managed_mcp_registry", None)
     if registry is None:  # pragma: no cover - defensive
         raise RuntimeError("Built-in MCP registry is not initialized.")
     return registry
@@ -147,26 +150,31 @@ async def call_mcp_server_tool(
             tool_name=tool_name,
             arguments=dict(body.arguments),
         )
-    except HostedMcpToolNotFoundError as exc:
+    except ManagedMcpToolNotFoundError as exc:
         raise _missing_tool_http_exception(server_label=server_label, tool_name=tool_name) from exc
-    except HostedMcpStaleToolError as exc:
+    except ManagedMcpStaleToolError as exc:
         # Defensive: runtime registry should normally consume stale-tool misses in
         # `call_tool_with_refresh(...)`, but keep this mapping explicit at the HTTP boundary.
         raise _missing_tool_http_exception(server_label=server_label, tool_name=tool_name) from exc
     except BadInputError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        secret_values = registry.get_server_secret_values(server_label)
+        error_text = redact_and_truncate_error_text(
+            text=_exception_summary(exc),
+            secret_values=secret_values,
+        )
         logger.warning(
-            f"{request_id} - Built-in MCP tool call failed: "
-            f"server_label={server_label!r} tool_name={tool_name!r} error={exc.__class__.__name__}"
+            "{} - Built-in MCP tool call failed: server_label={!r} tool_name={!r} error={!r}",
+            request_id,
+            server_label,
+            tool_name,
+            error_text,
         )
         return {
             "ok": False,
             "output_text": None,
-            "error_text": redact_and_truncate_error_text(
-                text=str(exc).strip() or exc.__class__.__name__,
-                secret_values=registry.get_server_secret_values(server_label),
-            ),
+            "error_text": error_text,
         }
 
     return {
@@ -174,6 +182,13 @@ async def call_mcp_server_tool(
         "output_text": canonicalize_output_text(raw),
         "error_text": None,
     }
+
+
+def _exception_summary(exc: BaseException) -> str:
+    message = str(exc).strip()
+    if message:
+        return f"{exc.__class__.__name__}: {message}"
+    return exc.__class__.__name__
 
 
 if __name__ == "__main__":

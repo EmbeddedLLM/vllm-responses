@@ -27,13 +27,13 @@ from vllm_responses.lm_failures import (
 from vllm_responses.lm_failures import (
     log_failure_summary as _log_failure_summary,
 )
-from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
-from vllm_responses.mcp.types import McpToolRef
 from vllm_responses.responses_core.composer import ResponseComposer
 from vllm_responses.responses_core.normalizer import PydanticAINormalizer
 from vllm_responses.responses_core.sse import stream_responses_sse
 from vllm_responses.responses_core.store import ResponseStore, get_default_response_store
 from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
+from vllm_responses.tools.mcp.types import McpToolRef
 from vllm_responses.tools.runtime import ToolRuntimeContext, bind_tool_runtime_context
 from vllm_responses.tools.web_search.runtime import build_web_search_tool_runtime
 from vllm_responses.types.openai import (

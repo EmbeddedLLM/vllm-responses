@@ -46,25 +46,23 @@ from pydantic_ai.models.openai import OpenAIChatModelSettings, OpenAIResponsesMo
 from pydantic_ai.toolsets.abstract import AbstractToolset
 from pydantic_extra_types.timezone_name import TimeZoneName
 
-from vllm_responses.mcp.gateway_toolset import McpGatewayToolset, ResolvedMcpTool
-from vllm_responses.mcp.resolver import (
-    ResolvedMcpServerTools,
-    build_request_remote_toolset,
-    resolve_mcp_declarations,
-)
-from vllm_responses.mcp.types import McpToolInfo, McpToolRef
-from vllm_responses.mcp.utils import (
-    HOSTED_MCP_INTERNAL_PREFIX,
-    build_internal_mcp_tool_name,
-    normalize_mcp_input_schema,
-)
 from vllm_responses.tools import TOOLS
 from vllm_responses.tools.ids import CODE_INTERPRETER_TOOL, WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.assembly import (
+    build_mcp_toolset_for_request,
+    register_internal_mcp_tool_name,
+)
+from vllm_responses.tools.mcp.resolver import (
+    ResolvedMcpServerTools,
+    resolve_mcp_declarations,
+)
+from vllm_responses.tools.mcp.types import McpToolInfo, McpToolRef
+from vllm_responses.tools.mcp.utils import HOSTED_MCP_INTERNAL_PREFIX
 from vllm_responses.utils import uuid7_str
 from vllm_responses.utils.exceptions import BadInputError
 
 if TYPE_CHECKING:
-    from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
+    from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 
 
 class OpenAIConversation(BaseModel):
@@ -937,6 +935,9 @@ def _apply_allowed_tools_choice(
     dict[str, ResolvedMcpServerTools],
     dict[str, dict[str, McpToolInfo]],
 ]:
+    # A server-wide MCP allowed_tools entry (`name=None`) dominates named
+    # entries for the same server; this mirrors OpenAI's monotonic selection
+    # shape and avoids accidentally narrowing a broader entry seen earlier.
     allowed_builtin_names = {
         _normalize_hosted_tool_type(tool.type)
         for tool in choice.tools
@@ -1109,35 +1110,6 @@ class AgentRunSettings(TypedDict):
     instructions: str | None
     toolsets: list[AbstractToolset[Any]] | None
     usage_limits: UsageLimits
-
-
-def _normalize_mcp_input_schema(
-    *,
-    server_label: str,
-    tool_name: str,
-    input_schema: dict[str, object],
-) -> dict[str, object]:
-    try:
-        normalized = normalize_mcp_input_schema(input_schema)
-    except (TypeError, ValueError) as exc:
-        raise BadInputError(
-            f"MCP tool {server_label!r}:{tool_name!r} has invalid `input_schema`: {exc}"
-        ) from exc
-
-    if normalized["type"] != "object":
-        raise BadInputError(
-            f"MCP tool {server_label!r}:{tool_name!r} has invalid `input_schema`; "
-            "root `type` must be `object`."
-        )
-
-    try:
-        Draft202012Validator.check_schema(normalized)
-    except jsonschema_exceptions.SchemaError as exc:
-        raise BadInputError(
-            f"MCP tool {server_label!r}:{tool_name!r} has invalid `input_schema`: {exc.message}"
-        ) from exc
-
-    return normalized
 
 
 class OpenAIResponsesFunctionTool(BaseModel):
@@ -1677,25 +1649,10 @@ class vLLMResponsesRequest(BaseModel):
         ```
         """
         mcp_tool_name_map: dict[str, McpToolRef] = {}
-        mcp_internal_name_by_ref: dict[McpToolRef, str] = {}
-
-        def _register_internal_mcp_tool(ref: McpToolRef) -> str:
-            existing_name = mcp_internal_name_by_ref.get(ref)
-            if existing_name is not None:
-                return existing_name
-            try:
-                internal_tool_name = build_internal_mcp_tool_name(
-                    server_label=ref.server_label,
-                    tool_name=ref.tool_name,
-                    existing_map=mcp_tool_name_map,
-                )
-            except ValueError as exc:
-                raise BadInputError(str(exc)) from exc
-            mcp_tool_name_map[internal_tool_name] = ref
-            mcp_internal_name_by_ref[ref] = internal_tool_name
-            return internal_tool_name
 
         if not isinstance(self.input, str):
+            # Historical MCP calls must reserve internal names before current
+            # tools are assembled so rehydration keeps stable tool-call refs.
             historical_mcp_refs = sorted(
                 {
                     McpToolRef(server_label=msg.server_label, tool_name=msg.name)
@@ -1705,7 +1662,7 @@ class vLLMResponsesRequest(BaseModel):
                 key=lambda ref: (ref.server_label, ref.tool_name),
             )
             for ref in historical_mcp_refs:
-                _register_internal_mcp_tool(ref)
+                register_internal_mcp_tool_name(ref=ref, mcp_tool_name_map=mcp_tool_name_map)
 
         # Process chat history
         # `previous_response_id` hydration is implemented in Layer 4 (ResponseStore). This method expects
@@ -1920,8 +1877,9 @@ class vLLMResponsesRequest(BaseModel):
 
                 if isinstance(msg, OpenAIMcpToolCall):
                     msg_id = msg.id
-                    internal_tool_name = _register_internal_mcp_tool(
-                        McpToolRef(server_label=msg.server_label, tool_name=msg.name)
+                    internal_tool_name = register_internal_mcp_tool_name(
+                        ref=McpToolRef(server_label=msg.server_label, tool_name=msg.name),
+                        mcp_tool_name_map=mcp_tool_name_map,
                     )
                     mcp_args: dict[str, Any] = {}
                     try:
@@ -1955,7 +1913,9 @@ class vLLMResponsesRequest(BaseModel):
 
                 raise BadInputError(f"Invalid message type: {type(msg)}")
 
-        # Process tool list
+        # Process tool list. MCP declarations are resolved below, but global
+        # tool_choice policy stays in this request conversion layer because it
+        # spans built-ins, custom function tools, and MCP.
         builtin_tools: list[Tool] = []
         deferred_tools: list[ToolDefinition] = []
         mcp_declarations: dict[str, OpenAIResponsesMcpTool] = {}
@@ -1997,7 +1957,6 @@ class vLLMResponsesRequest(BaseModel):
                 builtin_mcp_runtime_client=builtin_mcp_runtime_client,
                 request_remote_enabled=request_remote_enabled,
                 request_remote_url_checks_enabled=request_remote_url_checks_enabled,
-                request_remote_toolset_builder=build_request_remote_toolset,
             )
 
         internal_tool_choice_instruction: str | None = None
@@ -2097,52 +2056,16 @@ class vLLMResponsesRequest(BaseModel):
         else:
             raise BadInputError(f"Invalid `tool_choice` provided: {self.tool_choice}.")
 
-        mcp_resolved_tools: list[ResolvedMcpTool] = []
-        for server_label, server_runtime in sorted(mcp_servers.items()):
-            tool_infos = selected_mcp_tool_infos_by_server.get(
-                server_label, server_runtime.allowed_tool_infos
-            )
-            for tool_name, tool_info in tool_infos.items():
-                normalized_schema = _normalize_mcp_input_schema(
-                    server_label=server_label,
-                    tool_name=tool_name,
-                    input_schema=tool_info.input_schema,
-                )
-                ref = McpToolRef(
-                    server_label=server_label,
-                    tool_name=tool_name,
-                    mode=server_runtime.mode,
-                )
-                internal_tool_name = _register_internal_mcp_tool(ref)
-
-                description = (
-                    tool_info.description.strip()
-                    if isinstance(tool_info.description, str) and tool_info.description.strip()
-                    else f"MCP tool {server_label}:{tool_name}"
-                )
-                mcp_resolved_tools.append(
-                    ResolvedMcpTool(
-                        internal_name=internal_tool_name,
-                        ref=ref,
-                        mcp_toolset=server_runtime.mcp_toolset,
-                        mcp_tool_name=tool_name,
-                        description=description,
-                        input_schema=normalized_schema,
-                        schema_validator=Draft202012Validator(normalized_schema),
-                        secret_values=server_runtime.secret_values,
-                        mcp_tool=server_runtime.allowed_mcp_tools_by_name.get(tool_name),
-                    )
-                )
+        mcp_toolset = build_mcp_toolset_for_request(
+            mcp_servers=mcp_servers,
+            selected_mcp_tool_infos_by_server=selected_mcp_tool_infos_by_server,
+            mcp_tool_name_map=mcp_tool_name_map,
+        )
         toolsets: list[AbstractToolset[Any]] = []
         if builtin_tools:
             toolsets.append(FunctionToolset(tools=builtin_tools))
-        if mcp_resolved_tools:
-            toolsets.append(
-                McpGatewayToolset(
-                    tools=mcp_resolved_tools,
-                    id="vllm_responses_mcp",
-                )
-            )
+        if mcp_toolset is not None:
+            toolsets.append(mcp_toolset)
         if deferred_tools:
             toolsets.append(ExternalToolset(tool_defs=deferred_tools))
         run_settings: AgentRunSettings = {

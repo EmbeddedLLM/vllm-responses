@@ -5,7 +5,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from vllm_responses.mcp.types import McpExecutionResult, McpServerInfo, McpToolInfo
+from vllm_responses.tools.mcp.types import McpExecutionResult, McpServerInfo, McpToolInfo
 
 MCP_TOOL_NOT_FOUND_PREFIX = "MCP_TOOL_NOT_FOUND:"
 

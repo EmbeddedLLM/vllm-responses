@@ -4,10 +4,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vllm_responses.configs.runtime import RuntimeConfig
-from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
-from vllm_responses.tools.base.runtime import bind_runtime_requirements
 from vllm_responses.tools.base.types import BuiltinActionAdapter
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.tools.profile_resolution import resolve_profiled_builtin_tool
 from vllm_responses.tools.web_search.adapters import WEB_SEARCH_ADAPTER_SPECS
 from vllm_responses.tools.web_search.config import resolve_request_config
@@ -51,10 +50,12 @@ def build_web_search_tool_runtime(
             tool_type=WEB_SEARCH_TOOL,
             profile_id=request_config.profile_id,
         )
-        bound_requirements = bind_runtime_requirements(
-            resolved_tool=resolved_tool,
-            builtin_mcp_runtime_client=builtin_mcp_runtime_client,
-        )
+        requires_builtin_mcp = bool(resolved_tool.builtin_mcp_server_labels)
+        if requires_builtin_mcp and builtin_mcp_runtime_client is None:
+            raise ValueError(
+                "Built-in MCP runtime is required for "
+                f"{resolved_tool.tool_type!r} profile {resolved_tool.profile_id!r}."
+            )
         adapter_by_action: dict[str, BuiltinActionAdapter] = {
             binding.action_name: WEB_SEARCH_ADAPTER_SPECS[binding.adapter_id].build_adapter()
             for binding in resolved_tool.action_bindings
@@ -65,7 +66,9 @@ def build_web_search_tool_runtime(
         executor=WebSearchExecutor(
             request_config=request_config,
             resolved_tool=resolved_tool,
-            bound_requirements=bound_requirements,
+            builtin_mcp_runtime_client=(
+                builtin_mcp_runtime_client if requires_builtin_mcp else None
+            ),
             adapter_by_action=adapter_by_action,
             page_cache=WebSearchPageCache(),
         )

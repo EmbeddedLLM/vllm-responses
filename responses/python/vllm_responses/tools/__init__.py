@@ -7,7 +7,11 @@ TOOLS: dict[str, Tool] = {}
 
 def register(name_or_func=None):
     """
-    Decorator to register a function as a tool.
+    Decorator to register a gateway-executed built-in tool callable.
+
+    Keep this root module small: it is only the pydantic-ai function registry.
+    Profile planning, request-local helper state, and tool-specific execution
+    live under `tools/base`, `tools/runtime.py`, and per-tool packages.
 
     Can be used as:
     - @register - uses function name

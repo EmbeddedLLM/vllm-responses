@@ -102,11 +102,13 @@ class StdioMcpServerEntry(McpServerEntryBase):
 McpServerEntry: TypeAlias = HttpMcpServerEntry | StdioMcpServerEntry
 
 
-def split_hosted_server_entry(
+def split_managed_server_entry(
     server_entry: object,
 ) -> McpServerEntry:
+    """Parse one gateway-managed MCP server entry from `mcpServers.<label>`."""
+
     if not isinstance(server_entry, dict):
-        raise ValueError("Each hosted MCP server entry must be a JSON object.")
+        raise ValueError("Each Built-in MCP server entry must be a JSON object.")
 
     mcp_server_entry = dict(server_entry)
 
@@ -115,11 +117,11 @@ def split_hosted_server_entry(
         transport_type = transport.get("type")
         if isinstance(transport_type, str) and transport_type.strip().lower() == "stdio":
             raise ValueError(
-                "Hosted MCP does not accept nested `transport` objects. "
+                "Built-in MCP does not accept nested `transport` objects. "
                 "For stdio servers, move `command`/`args`/`env`/`cwd` to top-level."
             )
         raise ValueError(
-            "Hosted MCP `transport` must be a string when provided; "
+            "Built-in MCP `transport` must be a string when provided; "
             "nested `transport` objects are not supported."
         )
 
@@ -131,7 +133,7 @@ def split_hosted_server_entry(
         and transport.strip().lower() == "stdio"
     ):
         raise ValueError(
-            "Hosted MCP stdio transport requires command-style fields; provide at least `command`."
+            "Built-in MCP stdio transport requires command-style fields; provide at least `command`."
         )
 
     if has_command_style_keys:
@@ -142,17 +144,17 @@ def split_hosted_server_entry(
 def _validate_stdio_entry(mcp_server_entry: dict[str, object]) -> StdioMcpServerEntry:
     if "url" in mcp_server_entry or "headers" in mcp_server_entry:
         raise ValueError(
-            "Hosted MCP stdio entry must not include HTTP-only fields `url` or `headers`."
+            "Built-in MCP stdio entry must not include HTTP-only fields `url` or `headers`."
         )
 
     command = mcp_server_entry.get("command")
     if not isinstance(command, str) or not command.strip():
-        raise ValueError("Hosted MCP stdio entry must include a non-empty `command`.")
+        raise ValueError("Built-in MCP stdio entry must include a non-empty `command`.")
 
     args = mcp_server_entry.get("args")
     if args is not None:
         if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-            raise ValueError("Hosted MCP stdio `args` must be a list of strings when provided.")
+            raise ValueError("Built-in MCP stdio `args` must be a list of strings when provided.")
 
     env = mcp_server_entry.get("env")
     if env is not None:
@@ -160,20 +162,20 @@ def _validate_stdio_entry(mcp_server_entry: dict[str, object]) -> StdioMcpServer
             isinstance(key, str) and isinstance(value, str) for key, value in env.items()
         ):
             raise ValueError(
-                "Hosted MCP stdio `env` must be an object of string-to-string pairs when provided."
+                "Built-in MCP stdio `env` must be an object of string-to-string pairs when provided."
             )
 
     cwd = mcp_server_entry.get("cwd")
     if cwd is not None and not isinstance(cwd, str):
-        raise ValueError("Hosted MCP stdio `cwd` must be a string when provided.")
+        raise ValueError("Built-in MCP stdio `cwd` must be a string when provided.")
 
     transport = mcp_server_entry.get("transport")
     if transport is not None:
         if not isinstance(transport, str) or not transport.strip():
-            raise ValueError("Hosted MCP `transport` must be a non-empty string when provided.")
+            raise ValueError("Built-in MCP `transport` must be a non-empty string when provided.")
         if transport.strip().lower() != "stdio":
             raise ValueError(
-                "Hosted MCP stdio `transport` must be `stdio` when command-style fields are used."
+                "Built-in MCP stdio `transport` must be `stdio` when command-style fields are used."
             )
 
     return StdioMcpServerEntry.model_validate(mcp_server_entry)
@@ -182,36 +184,36 @@ def _validate_stdio_entry(mcp_server_entry: dict[str, object]) -> StdioMcpServer
 def _validate_http_entry(mcp_server_entry: dict[str, object]) -> HttpMcpServerEntry:
     url = mcp_server_entry.get("url")
     if not isinstance(url, str) or not url.strip():
-        raise ValueError("Hosted MCP server entry must include a non-empty `url`.")
+        raise ValueError("Built-in MCP server entry must include a non-empty `url`.")
 
     try:
         parsed_url = urlsplit(url)
     except ValueError as exc:
-        raise ValueError(f"Invalid hosted MCP `url`: {exc}") from exc
+        raise ValueError(f"Invalid Built-in MCP `url`: {exc}") from exc
 
     if not parsed_url.scheme or not parsed_url.netloc:
-        raise ValueError("Hosted MCP `url` must be absolute.")
+        raise ValueError("Built-in MCP `url` must be absolute.")
 
     if parsed_url.scheme.lower() not in {"http", "https"}:
-        raise ValueError("Hosted MCP `url` must use `http` or `https`.")
+        raise ValueError("Built-in MCP `url` must use `http` or `https`.")
 
     headers = mcp_server_entry.get("headers")
     if headers is not None:
         if not isinstance(headers, dict) or not all(
             isinstance(key, str) and isinstance(value, str) for key, value in headers.items()
         ):
-            raise ValueError("Hosted MCP `headers` must be an object of string-to-string pairs.")
+            raise ValueError("Built-in MCP `headers` must be an object of string-to-string pairs.")
 
     auth = mcp_server_entry.get("auth")
     if auth is not None and not isinstance(auth, str):
-        raise ValueError("Hosted MCP `auth` must be a string when provided.")
+        raise ValueError("Built-in MCP `auth` must be a string when provided.")
 
     transport = mcp_server_entry.get("transport")
     if transport is not None:
         if not isinstance(transport, str) or not transport.strip():
-            raise ValueError("Hosted MCP `transport` must be a non-empty string when provided.")
+            raise ValueError("Built-in MCP `transport` must be a non-empty string when provided.")
         if transport.strip().lower() == "stdio":
-            raise ValueError("URL-style hosted MCP entries must not set `transport` to `stdio`.")
+            raise ValueError("URL-style Built-in MCP entries must not set `transport` to `stdio`.")
 
     return HttpMcpServerEntry.model_validate(mcp_server_entry)
 
@@ -235,7 +237,7 @@ def load_mcp_runtime_config_from_obj(raw: object) -> McpRuntimeConfig:
                 f"{SERVER_LABEL_REGEX.pattern!r}. Received: {server_label!r}"
             )
 
-        mcp_server_entry = split_hosted_server_entry(server_obj)
+        mcp_server_entry = split_managed_server_entry(server_obj)
         parsed_servers[server_label] = McpServerRuntimeConfig(
             mcp_server_entry=mcp_server_entry,
         )

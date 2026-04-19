@@ -16,8 +16,8 @@ if TYPE_CHECKING:
     from asyncio.subprocess import Process
 
     from vllm_responses.configs.runtime import RuntimeConfig
-    from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
     from vllm_responses.routers.upstream_proxy import ProxyClientManager
+    from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
     from vllm_responses.utils.cassette_replay import CassetteReplayer
 
 

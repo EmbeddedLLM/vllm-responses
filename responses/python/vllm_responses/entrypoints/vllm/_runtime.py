@@ -181,7 +181,7 @@ def _build_integrated_app(
     runtime_config: RuntimeConfig,
 ) -> FastAPI:
     from vllm_responses.entrypoints.gateway._app import augment_integrated_gateway_app
-    from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
+    from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 
     with suppress_native_responses_attach():
         if model_config is None:

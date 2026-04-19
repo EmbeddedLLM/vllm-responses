@@ -8,10 +8,10 @@ from loguru import logger
 
 from vllm_responses.observability.metrics import record_tool_executed
 from vllm_responses.tools.base.types import (
-    BoundRuntimeRequirements,
     BuiltinActionAdapter,
     ResolvedProfiledBuiltinTool,
 )
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.tools.web_search.adapters.base import (
     OpenPageAdapter,
     SearchAdapter,
@@ -44,7 +44,7 @@ from vllm_responses.tools.web_search.types import (
 class WebSearchExecutor:
     request_config: ResolvedWebSearchRequestConfig
     resolved_tool: ResolvedProfiledBuiltinTool
-    bound_requirements: BoundRuntimeRequirements
+    builtin_mcp_runtime_client: BuiltinMcpRuntimeClient | None
     adapter_by_action: dict[str, BuiltinActionAdapter]
     page_cache: WebSearchPageCache
     _warned_ignored_hints: set[str] = field(default_factory=set, init=False, repr=False)
@@ -72,7 +72,7 @@ class WebSearchExecutor:
             user_location=self.request_config.user_location,
         )
         ctx = WebSearchAdapterContext(
-            builtin_mcp_runtime_client=self.bound_requirements.builtin_mcp_runtime_client,
+            builtin_mcp_runtime_client=self.builtin_mcp_runtime_client,
         )
 
         if action_request.action == "search":

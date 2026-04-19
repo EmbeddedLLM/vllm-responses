@@ -9,11 +9,10 @@ from pydantic import TypeAdapter
 from pydantic_ai.tools import ToolDefinition
 from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 
-from vllm_responses.mcp.types import McpExecutionResult, McpToolRef
-from vllm_responses.mcp.utils import (
+from vllm_responses.tools.mcp.backend import McpExecutionBackend
+from vllm_responses.tools.mcp.types import McpExecutionResult, McpToolRef
+from vllm_responses.tools.mcp.utils import (
     build_mcp_tool_result_payload,
-    canonicalize_output_text,
-    is_mcp_tool_keyerror,
     redact_and_truncate_error_text,
 )
 
@@ -22,18 +21,20 @@ _DICT_ARGS_VALIDATOR = TypeAdapter(dict[str, Any]).validator
 
 @dataclass(frozen=True, slots=True)
 class ResolvedMcpTool:
+    """Gateway-facing MCP tool metadata plus the backend that executes it."""
+
     internal_name: str
     ref: McpToolRef
-    mcp_toolset: AbstractToolset[Any]
-    mcp_tool_name: str
+    backend: McpExecutionBackend
     description: str
     input_schema: dict[str, object]
     schema_validator: Draft202012Validator
     secret_values: tuple[str, ...] = ()
-    mcp_tool: ToolsetTool[Any] | None = None
 
 
 class McpGatewayToolset(AbstractToolset[Any]):
+    """Single pydantic-ai toolset that exposes all effective MCP tools."""
+
     def __init__(
         self,
         *,
@@ -42,9 +43,6 @@ class McpGatewayToolset(AbstractToolset[Any]):
     ) -> None:
         self._tools_by_name = {
             tool.internal_name: tool for tool in sorted(tools, key=lambda t: t.internal_name)
-        }
-        self._mcp_tool_cache: dict[str, ToolsetTool[Any]] = {
-            tool.internal_name: tool.mcp_tool for tool in tools if tool.mcp_tool is not None
         }
         self._toolset_tools = {
             internal_name: ToolsetTool(
@@ -76,7 +74,7 @@ class McpGatewayToolset(AbstractToolset[Any]):
         ctx,
         tool: ToolsetTool[Any],
     ) -> Any:
-        _ = tool
+        _ = ctx, tool
         resolved = self._tools_by_name.get(name)
         if resolved is None:  # pragma: no cover - defensive
             raise RuntimeError("MCP tool resolution failed for internal tool name.")
@@ -86,6 +84,8 @@ class McpGatewayToolset(AbstractToolset[Any]):
             arguments=tool_args,
         )
         if validation_error is not None:
+            # Return item-level MCP failure payloads instead of raising; a
+            # failed MCP call should not become a fatal model stream error.
             return build_mcp_tool_result_payload(
                 ref=resolved.ref,
                 result=McpExecutionResult(
@@ -97,51 +97,9 @@ class McpGatewayToolset(AbstractToolset[Any]):
 
         result: McpExecutionResult
         try:
-            mcp_tool = self._mcp_tool_cache.get(name)
-
-            if mcp_tool is None:
-                mcp_tool = await self._refresh_mcp_tool(name=name, resolved=resolved)
-                if mcp_tool is None:
-                    return build_mcp_tool_result_payload(
-                        ref=resolved.ref,
-                        result=McpExecutionResult(
-                            ok=False,
-                            output_text=None,
-                            error_text=_tool_unavailable_error_text(resolved),
-                        ),
-                    )
-
-            try:
-                raw = await resolved.mcp_toolset.call_tool(
-                    resolved.mcp_tool_name,
-                    dict(tool_args),
-                    ctx=ctx,
-                    tool=mcp_tool,
-                )
-            except Exception as exc:
-                if not is_mcp_tool_keyerror(exc, resolved.mcp_tool_name):
-                    raise
-                mcp_tool = await self._refresh_mcp_tool(name=name, resolved=resolved)
-                if mcp_tool is None:
-                    return build_mcp_tool_result_payload(
-                        ref=resolved.ref,
-                        result=McpExecutionResult(
-                            ok=False,
-                            output_text=None,
-                            error_text=_tool_unavailable_error_text(resolved),
-                        ),
-                    )
-                raw = await resolved.mcp_toolset.call_tool(
-                    resolved.mcp_tool_name,
-                    dict(tool_args),
-                    ctx=ctx,
-                    tool=mcp_tool,
-                )
-
-            result = McpExecutionResult(
-                ok=True,
-                output_text=canonicalize_output_text(raw),
-                error_text=None,
+            result = await resolved.backend.call_tool(
+                resolved.ref.tool_name,
+                dict(tool_args),
             )
         except Exception as exc:
             result = McpExecutionResult(
@@ -154,20 +112,6 @@ class McpGatewayToolset(AbstractToolset[Any]):
             )
 
         return build_mcp_tool_result_payload(ref=resolved.ref, result=result)
-
-    async def _refresh_mcp_tool(
-        self,
-        *,
-        name: str,
-        resolved: ResolvedMcpTool,
-    ) -> ToolsetTool[Any] | None:
-        refreshed = await resolved.mcp_toolset.get_tools(ctx=None)
-        mcp_tool = refreshed.get(resolved.mcp_tool_name)
-        if mcp_tool is None:
-            self._mcp_tool_cache.pop(name, None)
-            return None
-        self._mcp_tool_cache[name] = mcp_tool
-        return mcp_tool
 
 
 def _validate_mcp_tool_arguments(
@@ -183,10 +127,3 @@ def _validate_mcp_tool_arguments(
         if path:
             return f"input_validation_error: {exc.message} (path={path})"
         return f"input_validation_error: {exc.message}"
-
-
-def _tool_unavailable_error_text(resolved: ResolvedMcpTool) -> str:
-    return (
-        f"MCP tool {resolved.ref.tool_name!r} is not available for "
-        f"server {resolved.ref.server_label!r}."
-    )

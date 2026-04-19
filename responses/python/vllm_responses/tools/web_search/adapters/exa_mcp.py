@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeTransportError
 from vllm_responses.tools.base.types import BuiltinActionAdapter
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeTransportError
 from vllm_responses.tools.web_search.adapters.base import (
     OpenPageAdapter,
     SearchAdapter,

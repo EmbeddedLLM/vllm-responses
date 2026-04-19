@@ -22,30 +22,6 @@ from sse_test_utils import extract_completed_response, parse_sse_frames, parse_s
 from vllm_responses.configs.sources import EnvSource
 from vllm_responses.entrypoints import llm as mock_llm
 from vllm_responses.entrypoints._state import VRAppState
-from vllm_responses.mcp.config import (
-    McpRuntimeConfig,
-    load_mcp_runtime_config,
-    merge_mcp_runtime_configs,
-    split_hosted_server_entry,
-)
-from vllm_responses.mcp.gateway_toolset import McpGatewayToolset
-from vllm_responses.mcp.runtime_client import (
-    BuiltinMcpRuntimeTransportError,
-    BuiltinMcpRuntimeUnavailableServerError,
-    BuiltinMcpRuntimeUnknownServerError,
-)
-from vllm_responses.mcp.types import (
-    McpExecutionResult,
-    McpServerInfo,
-    McpToolInfo,
-    McpToolRef,
-    RequestRemoteMcpServerBinding,
-)
-from vllm_responses.mcp.utils import (
-    build_mcp_tool_result_payload,
-    canonicalize_output_text,
-    parse_mcp_tool_result_payload,
-)
 from vllm_responses.responses_core.composer import ResponseComposer
 from vllm_responses.responses_core.models import (
     McpCallArgumentsDelta,
@@ -57,6 +33,31 @@ from vllm_responses.responses_core.models import (
 )
 from vllm_responses.responses_core.normalizer import PydanticAINormalizer
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.backend import ManagedMcpBackend, RequestRemoteMcpBackend
+from vllm_responses.tools.mcp.config import (
+    McpRuntimeConfig,
+    load_mcp_runtime_config,
+    merge_mcp_runtime_configs,
+    split_managed_server_entry,
+)
+from vllm_responses.tools.mcp.gateway_toolset import McpGatewayToolset
+from vllm_responses.tools.mcp.runtime_client import (
+    BuiltinMcpRuntimeTransportError,
+    BuiltinMcpRuntimeUnavailableServerError,
+    BuiltinMcpRuntimeUnknownServerError,
+)
+from vllm_responses.tools.mcp.types import (
+    McpExecutionResult,
+    McpServerInfo,
+    McpToolInfo,
+    McpToolRef,
+    RequestRemoteMcpServerBinding,
+)
+from vllm_responses.tools.mcp.utils import (
+    build_mcp_tool_result_payload,
+    canonicalize_output_text,
+    parse_mcp_tool_result_payload,
+)
 from vllm_responses.tools.profile_resolution import (
     build_builtin_mcp_runtime_config,
     profiled_builtin_requires_mcp,
@@ -212,7 +213,7 @@ def test_merge_mcp_runtime_configs_generic_entries_override_builtin_defaults() -
         tool_type=WEB_SEARCH_TOOL,
         profile_id="duckduckgo_plus_fetch",
     )
-    explicit_fetch_entry = split_hosted_server_entry(
+    explicit_fetch_entry = split_managed_server_entry(
         {
             "command": "custom-fetch",
             "args": ["--stdio"],
@@ -225,7 +226,7 @@ def test_merge_mcp_runtime_configs_generic_entries_override_builtin_defaults() -
                 mcp_server_entry=explicit_fetch_entry,
             ),
             "local_fs": type(builtin_cfg.mcp_servers["fetch"])(
-                mcp_server_entry=split_hosted_server_entry(
+                mcp_server_entry=split_managed_server_entry(
                     {
                         "command": "uvx",
                         "args": ["mcp-server-filesystem", "/tmp"],
@@ -244,7 +245,7 @@ def test_merge_mcp_runtime_configs_generic_entries_override_builtin_defaults() -
     ) == {"command": "custom-fetch", "args": ["--stdio"]}
 
 
-def test_profiled_builtin_requires_mcp_tracks_resolved_runtime_requirements() -> None:
+def test_profiled_builtin_requires_mcp_tracks_resolved_mcp_server_labels() -> None:
     assert profiled_builtin_requires_mcp(tool_type=WEB_SEARCH_TOOL, profile_id="exa_mcp") is True
     assert (
         profiled_builtin_requires_mcp(
@@ -593,8 +594,8 @@ def test_load_mcp_runtime_config_rejects_non_string_auth(tmp_path: Path) -> None
         load_mcp_runtime_config(str(cfg_path))
 
 
-def test_split_hosted_server_entry_preserves_passthrough_fields() -> None:
-    mcp_server_entry = split_hosted_server_entry(
+def test_split_managed_server_entry_preserves_passthrough_fields() -> None:
+    mcp_server_entry = split_managed_server_entry(
         {
             "url": "https://mcp.example.com/mcp",
             "headers": {"Authorization": "Bearer token"},
@@ -608,8 +609,8 @@ def test_split_hosted_server_entry_preserves_passthrough_fields() -> None:
     }
 
 
-def test_split_hosted_server_entry_stdio_passthrough() -> None:
-    mcp_server_entry = split_hosted_server_entry(
+def test_split_managed_server_entry_stdio_passthrough() -> None:
+    mcp_server_entry = split_managed_server_entry(
         {
             "command": "npx",
             "args": ["-y", "some-mcp"],
@@ -717,7 +718,7 @@ class _FakeRuntimeServer:
 def _make_runtime_config(servers: dict) -> McpRuntimeConfig:
     parsed_servers: dict[str, object] = {}
     for server_label, server_entry in servers.items():
-        mcp_server_entry = split_hosted_server_entry(server_entry)
+        mcp_server_entry = split_managed_server_entry(server_entry)
         parsed_servers[server_label] = {
             "mcp_server_entry": mcp_server_entry,
         }
@@ -1072,9 +1073,8 @@ class _FakeRequestContractRegistry:
 
     async def get_server_runtime(self, server_label: str):
         return SimpleNamespace(
-            mcp_toolset=await self.get_server_toolset(server_label),
+            backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
             allowed_tool_infos={tool.name: tool for tool in await self.list_tools(server_label)},
-            allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
         )
 
 
@@ -1151,7 +1151,7 @@ def _install_request_remote_builder(
     remote_require_auth_for_list: bool = False,
     remote_require_auth_for_call: bool = False,
 ) -> _RemoteBuilderProbe:
-    import vllm_responses.types.openai as openai_types
+    import vllm_responses.tools.mcp.resolver as mcp_resolver
 
     seen_bindings: list[RequestRemoteMcpServerBinding] = []
 
@@ -1184,7 +1184,7 @@ def _install_request_remote_builder(
             require_auth_for_call=remote_require_auth_for_call,
         )
 
-    monkeypatch.setattr(openai_types, "build_request_remote_toolset", _build)
+    monkeypatch.setattr(mcp_resolver, "build_request_remote_toolset", _build)
     return _RemoteBuilderProbe(seen_bindings=seen_bindings)
 
 
@@ -1864,22 +1864,27 @@ class _GatewayNativeToolset(AbstractToolset[Any]):
 async def test_gateway_toolset_refreshes_and_avoids_per_call_inventory_fetch() -> None:
     from jsonschema import Draft202012Validator
 
-    from vllm_responses.mcp.gateway_toolset import ResolvedMcpTool
+    from vllm_responses.tools.mcp.gateway_toolset import ResolvedMcpTool
 
     mcp_toolset = _GatewayNativeToolset()
+    backend = RequestRemoteMcpBackend(
+        server_label="docs",
+        toolset=mcp_toolset,
+        secret_values=(),
+    )
+    await backend.list_tools()
+    backend._mcp_tools_by_name["search_docs"] = mcp_toolset.stale_tool()  # type: ignore[attr-defined]
     gateway_toolset = McpGatewayToolset(
         tools=[
             ResolvedMcpTool(
                 internal_name="mcp__docs__search_docs",
                 ref=McpToolRef(server_label="docs", tool_name="search_docs"),
-                mcp_toolset=mcp_toolset,
-                mcp_tool_name="search_docs",
+                backend=backend,
                 description="search docs",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": True},
                 schema_validator=Draft202012Validator(
                     {"type": "object", "properties": {}, "additionalProperties": True}
                 ),
-                mcp_tool=mcp_toolset.stale_tool(),
             )
         ]
     )
@@ -1890,7 +1895,7 @@ async def test_gateway_toolset_refreshes_and_avoids_per_call_inventory_fetch() -
     payload2 = await gateway_toolset.call_tool("mcp__docs__search_docs", {}, ctx=None, tool=tool)
     assert payload1["ok"] is True
     assert payload2["ok"] is True
-    assert mcp_toolset.get_tools_calls == 1
+    assert mcp_toolset.get_tools_calls == 2
     assert mcp_toolset.call_tool_calls == 3
 
 
@@ -1898,23 +1903,26 @@ async def test_gateway_toolset_refreshes_and_avoids_per_call_inventory_fetch() -
 async def test_gateway_toolset_returns_item_failure_when_refresh_misses_tool() -> None:
     from jsonschema import Draft202012Validator
 
-    from vllm_responses.mcp.gateway_toolset import ResolvedMcpTool
+    from vllm_responses.tools.mcp.gateway_toolset import ResolvedMcpTool
 
     mcp_toolset = _GatewayNativeToolset()
     mcp_toolset.clear_tools()
+    backend = RequestRemoteMcpBackend(
+        server_label="docs",
+        toolset=mcp_toolset,
+        secret_values=(),
+    )
     gateway_toolset = McpGatewayToolset(
         tools=[
             ResolvedMcpTool(
                 internal_name="mcp__docs__search_docs",
                 ref=McpToolRef(server_label="docs", tool_name="search_docs"),
-                mcp_toolset=mcp_toolset,
-                mcp_tool_name="search_docs",
+                backend=backend,
                 description="search docs",
                 input_schema={"type": "object", "properties": {}, "additionalProperties": True},
                 schema_validator=Draft202012Validator(
                     {"type": "object", "properties": {}, "additionalProperties": True}
                 ),
-                mcp_tool=None,
             )
         ]
     )
@@ -1929,7 +1937,7 @@ async def test_gateway_toolset_returns_item_failure_when_refresh_misses_tool() -
 
 
 def test_missing_tool_classifier_matches_expected_tool_name() -> None:
-    from vllm_responses.mcp.utils import is_mcp_tool_keyerror
+    from vllm_responses.tools.mcp.utils import is_mcp_tool_keyerror
 
     class _Exc(Exception):
         pass
@@ -1995,11 +2003,10 @@ async def test_hosted_mcp_toolset_validates_arguments_and_calls_router() -> None
 
         async def get_server_runtime(self, server_label: str):
             return SimpleNamespace(
-                mcp_toolset=await self.get_server_toolset(server_label),
+                backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
                 allowed_tool_infos={
                     tool.name: tool for tool in await self.list_tools(server_label)
                 },
-                allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
             )
 
     manager = _FakeRegistry()
@@ -2097,11 +2104,10 @@ async def test_hosted_mcp_toolset_uses_mcp_description_and_normalizes_missing_ty
 
         async def get_server_runtime(self, server_label: str):
             return SimpleNamespace(
-                mcp_toolset=await self.get_server_toolset(server_label),
+                backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
                 allowed_tool_infos={
                     tool.name: tool for tool in await self.list_tools(server_label)
                 },
-                allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
             )
 
     req = vLLMResponsesRequest.model_validate(
@@ -2237,11 +2243,10 @@ async def test_mcp_rehydration_keeps_colliding_tool_names_distinct() -> None:
 
         async def get_server_runtime(self, server_label: str):
             return SimpleNamespace(
-                mcp_toolset=await self.get_server_toolset(server_label),
+                backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
                 allowed_tool_infos={
                     tool.name: tool for tool in await self.list_tools(server_label)
                 },
-                allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
             )
 
     req = vLLMResponsesRequest.model_validate(
@@ -2300,6 +2305,55 @@ async def test_mcp_rehydration_keeps_colliding_tool_names_distinct() -> None:
         server_label="docs",
         tool_name="search_docs",
     )
+
+
+@pytest.mark.anyio
+async def test_mcp_rehydration_keeps_same_name_different_modes_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from vllm_responses.types.openai import vLLMResponsesRequest
+
+    _install_request_remote_builder(
+        monkeypatch,
+        remote_tools={"docs": ["search_docs"]},
+    )
+
+    req = vLLMResponsesRequest.model_validate(
+        {
+            "model": "some-model",
+            "stream": False,
+            "input": [
+                {
+                    "type": "mcp_call",
+                    "id": "mcp_call_1",
+                    "server_label": "docs",
+                    "name": "search_docs",
+                    "arguments": '{"query":"prior"}',
+                    "status": "completed",
+                    "output": "{}",
+                },
+            ],
+            "tools": [
+                {
+                    "type": "mcp",
+                    "server_label": "docs",
+                    "server_url": "https://mcp.example.com/sse",
+                }
+            ],
+            "tool_choice": "auto",
+        }
+    )
+
+    _run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+        request_remote_enabled=True,
+        request_remote_url_checks_enabled=True,
+    )
+
+    assert len(builtin_tools) == 0
+    assert set(mcp_tool_name_map.values()) == {
+        McpToolRef(server_label="docs", tool_name="search_docs", mode="hosted"),
+        McpToolRef(server_label="docs", tool_name="search_docs", mode="request_remote"),
+    }
 
 
 @pytest.mark.anyio
@@ -2763,9 +2817,8 @@ class _FakeGatewayRegistry:
 
     async def get_server_runtime(self, server_label: str):
         return SimpleNamespace(
-            mcp_toolset=await self.get_server_toolset(server_label),
+            backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
             allowed_tool_infos={tool.name: tool for tool in await self.list_tools(server_label)},
-            allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
         )
 
 
@@ -2835,9 +2888,8 @@ class _ValidationFailGatewayManager:
 
     async def get_server_runtime(self, server_label: str):
         return SimpleNamespace(
-            mcp_toolset=await self.get_server_toolset(server_label),
+            backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
             allowed_tool_infos={tool.name: tool for tool in await self.list_tools(server_label)},
-            allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
         )
 
 
@@ -3625,9 +3677,8 @@ class _TrackingGatewayManager:
 
     async def get_server_runtime(self, server_label: str):
         return SimpleNamespace(
-            mcp_toolset=await self.get_server_toolset(server_label),
+            backend=ManagedMcpBackend(server_label=server_label, runtime_client=self),
             allowed_tool_infos={tool.name: tool for tool in await self.list_tools(server_label)},
-            allowed_mcp_tools_by_name=await self.get_server_mcp_tools_by_name(server_label),
         )
 
 

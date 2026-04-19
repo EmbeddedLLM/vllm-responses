@@ -24,8 +24,6 @@ from pydantic_ai import (
     ToolReturnPart,
 )
 
-from vllm_responses.mcp.types import McpToolRef
-from vllm_responses.mcp.utils import parse_mcp_tool_result_payload, truncate_error_text
 from vllm_responses.observability.metrics import record_tool_call_requested
 from vllm_responses.responses_core.models import (
     CodeInterpreterCallCodeDelta,
@@ -54,6 +52,8 @@ from vllm_responses.responses_core.models import (
     WebSearchCallStarted,
 )
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.types import McpToolRef
+from vllm_responses.tools.mcp.utils import parse_mcp_tool_result_payload, truncate_error_text
 from vllm_responses.tools.web_search.types import (
     FindInPageActionPublic,
     OpenPageActionPublic,

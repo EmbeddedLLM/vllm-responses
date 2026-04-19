@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from vllm_responses.configs.sources import EnvSource
-from vllm_responses.mcp.config import (
-    McpRuntimeConfig,
-    McpServerRuntimeConfig,
-    split_hosted_server_entry,
-)
 from vllm_responses.tools.base.types import (
     ProfiledBuiltinProfileResolutionProvider,
     ResolvedProfiledBuiltinTool,
 )
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
+from vllm_responses.tools.mcp.config import (
+    McpRuntimeConfig,
+    McpServerRuntimeConfig,
+    split_managed_server_entry,
+)
 from vllm_responses.tools.web_search.profiles import WEB_SEARCH_PROFILE_RESOLUTION_PROVIDER
 
 PROFILE_RESOLUTION_PROVIDERS: dict[str, ProfiledBuiltinProfileResolutionProvider] = {
@@ -51,15 +51,7 @@ def resolve_required_builtin_mcp_server_labels(
     if profile_id is None:
         return ()
     resolved_tool = resolve_profiled_builtin_tool(tool_type=tool_type, profile_id=profile_id)
-    return tuple(
-        sorted(
-            {
-                requirement.key
-                for requirement in resolved_tool.runtime_requirements
-                if requirement.kind == "builtin_mcp_server"
-            }
-        )
-    )
+    return resolved_tool.builtin_mcp_server_labels
 
 
 def profiled_builtin_requires_mcp(
@@ -81,6 +73,8 @@ def build_builtin_mcp_runtime_config(
     profile_id: str | None = None,
     env: EnvSource | None = None,
 ) -> McpRuntimeConfig:
+    """Build managed MCP runtime config required by a profiled built-in tool."""
+
     env = EnvSource.from_env() if env is None else env
     definitions = tuple(
         _get_profile_resolution_provider(tool_type).required_mcp_definitions(profile_id)
@@ -95,6 +89,6 @@ def build_builtin_mcp_runtime_config(
         else:
             server_entry = dict(definition.server_entry or {})
         mcp_servers[definition.server_label] = McpServerRuntimeConfig(
-            mcp_server_entry=split_hosted_server_entry(server_entry),
+            mcp_server_entry=split_managed_server_entry(server_entry),
         )
     return McpRuntimeConfig(enabled=True, mcp_servers=mcp_servers)

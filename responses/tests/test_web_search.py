@@ -8,8 +8,7 @@ from vllm_responses.configs.builders import (
     build_runtime_config_for_standalone,
 )
 from vllm_responses.configs.sources import EnvSource
-from vllm_responses.mcp.types import McpExecutionResult
-from vllm_responses.tools.base.runtime import bind_runtime_requirements
+from vllm_responses.tools.mcp.types import McpExecutionResult
 from vllm_responses.tools.profile_resolution import resolve_profiled_builtin_tool
 from vllm_responses.tools.web_search.adapters import WEB_SEARCH_ADAPTER_SPECS
 from vllm_responses.tools.web_search.config import ResolvedWebSearchRequestConfig
@@ -84,10 +83,6 @@ def _build_executor(
     allowed_domains: tuple[str, ...] = (),
 ) -> WebSearchExecutor:
     resolved_tool = resolve_profiled_builtin_tool(tool_type="web_search", profile_id=profile_id)
-    bound_requirements = bind_runtime_requirements(
-        resolved_tool=resolved_tool,
-        builtin_mcp_runtime_client=runtime_client,
-    )
     return WebSearchExecutor(
         request_config=ResolvedWebSearchRequestConfig(
             profile_id=profile_id,
@@ -96,7 +91,7 @@ def _build_executor(
             user_location=None,
         ),
         resolved_tool=resolved_tool,
-        bound_requirements=bound_requirements,
+        builtin_mcp_runtime_client=runtime_client,
         adapter_by_action=_build_adapter_by_action(resolved_tool),
         page_cache=WebSearchPageCache(),
     )
@@ -420,7 +415,7 @@ def test_build_request_runtime_rejects_unknown_profile_early() -> None:
         )
 
 
-def test_build_request_runtime_requires_bound_mcp_runtime_for_exa_profile() -> None:
+def test_build_request_runtime_requires_mcp_runtime_for_exa_profile() -> None:
     runtime_config = build_runtime_config_for_standalone(
         env=EnvSource(environ={"VR_WEB_SEARCH_PROFILE": "exa_mcp"})
     )
@@ -530,10 +525,7 @@ async def test_web_search_executor_warns_only_for_ignored_hints(
             user_location={"country": "US", "city": None, "region": None, "timezone": None},
         ),
         resolved_tool=resolved_tool,
-        bound_requirements=bind_runtime_requirements(
-            resolved_tool=resolved_tool,
-            builtin_mcp_runtime_client=_FakeBuiltinMcpRuntimeClient(),
-        ),
+        builtin_mcp_runtime_client=_FakeBuiltinMcpRuntimeClient(),
         adapter_by_action=_build_adapter_by_action(resolved_tool),
         page_cache=WebSearchPageCache(),
     )
@@ -565,10 +557,7 @@ async def test_web_search_executor_warns_once_when_adapter_ignores_all_hints(
             user_location={"country": "US", "city": None, "region": None, "timezone": None},
         ),
         resolved_tool=resolved_tool,
-        bound_requirements=bind_runtime_requirements(
-            resolved_tool=resolved_tool,
-            builtin_mcp_runtime_client=runtime_client,
-        ),
+        builtin_mcp_runtime_client=runtime_client,
         adapter_by_action=_build_adapter_by_action(resolved_tool),
         page_cache=WebSearchPageCache(),
     )

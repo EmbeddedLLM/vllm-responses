@@ -3,8 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from vllm_responses.tools.base.types import BuiltinActionAdapter, RuntimeRequirement
-from vllm_responses.tools.web_search.adapters.base import builtin_mcp_requirement
+from vllm_responses.tools.base.types import BuiltinActionAdapter
 from vllm_responses.tools.web_search.adapters.duckduckgo_common import (
     DuckDuckGoCommonSearchAdapter,
 )
@@ -20,20 +19,20 @@ class WebSearchAdapterSpec:
     action_name: str
     adapter_id: str
     build_adapter: Callable[[], BuiltinActionAdapter]
-    runtime_requirements: tuple[RuntimeRequirement, ...] = ()
+    builtin_mcp_server_labels: tuple[str, ...] = ()
 
 
 WEB_SEARCH_ADAPTER_SPECS: dict[str, WebSearchAdapterSpec] = {
     "exa_mcp_search": WebSearchAdapterSpec(
         action_name="search",
         adapter_id="exa_mcp_search",
-        runtime_requirements=tuple(builtin_mcp_requirement("exa")),
+        builtin_mcp_server_labels=("exa",),
         build_adapter=ExaMcpSearchAdapter,
     ),
     "exa_mcp_open_page": WebSearchAdapterSpec(
         action_name="open_page",
         adapter_id="exa_mcp_open_page",
-        runtime_requirements=tuple(builtin_mcp_requirement("exa")),
+        builtin_mcp_server_labels=("exa",),
         build_adapter=ExaMcpOpenPageAdapter,
     ),
     "duckduckgo_common_search": WebSearchAdapterSpec(
@@ -44,7 +43,7 @@ WEB_SEARCH_ADAPTER_SPECS: dict[str, WebSearchAdapterSpec] = {
     "fetch_mcp_open_page": WebSearchAdapterSpec(
         action_name="open_page",
         adapter_id="fetch_mcp_open_page",
-        runtime_requirements=tuple(builtin_mcp_requirement("fetch")),
+        builtin_mcp_server_labels=("fetch",),
         build_adapter=FetchMcpOpenPageAdapter,
     ),
 }

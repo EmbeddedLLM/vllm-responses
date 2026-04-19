@@ -1,28 +1,31 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
-from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
+from pydantic_ai.toolsets.abstract import AbstractToolset
 
-from vllm_responses.mcp.fastmcp_runtime import (
-    build_fastmcp_toolset_from_server_entry,
-    extract_mcp_tool_infos,
+from vllm_responses.tools.mcp.backend import (
+    ManagedMcpBackend,
+    McpExecutionBackend,
+    RequestRemoteMcpBackend,
 )
-from vllm_responses.mcp.policy import (
+from vllm_responses.tools.mcp.fastmcp_runtime import (
+    build_fastmcp_toolset_from_server_entry,
+)
+from vllm_responses.tools.mcp.policy import (
     build_request_remote_headers,
     request_remote_secret_values,
     validate_request_remote_server_url,
 )
-from vllm_responses.mcp.runtime_client import (
+from vllm_responses.tools.mcp.runtime_client import (
     BuiltinMcpRuntimeClient,
     BuiltinMcpRuntimeTransportError,
     BuiltinMcpRuntimeUnavailableServerError,
     BuiltinMcpRuntimeUnknownServerError,
 )
-from vllm_responses.mcp.runtime_toolset import BuiltinMcpRuntimeToolset
-from vllm_responses.mcp.types import McpMode, McpToolInfo, RequestRemoteMcpServerBinding
-from vllm_responses.mcp.utils import redact_and_truncate_error_text
+from vllm_responses.tools.mcp.types import McpMode, McpToolInfo, RequestRemoteMcpServerBinding
+from vllm_responses.tools.mcp.utils import redact_and_truncate_error_text
 from vllm_responses.utils.exceptions import BadInputError
 
 if TYPE_CHECKING:
@@ -31,11 +34,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedMcpServerTools:
+    """Resolved per-server MCP inventory used after request-level validation."""
+
     mode: McpMode
-    mcp_toolset: AbstractToolset[Any]
+    backend: McpExecutionBackend
     secret_values: tuple[str, ...]
     allowed_tool_infos: dict[str, McpToolInfo]
-    allowed_mcp_tools_by_name: dict[str, ToolsetTool[Any]] = field(default_factory=dict)
 
 
 BuildRequestRemoteToolset = Callable[[RequestRemoteMcpServerBinding], AbstractToolset[Any]]
@@ -43,15 +47,16 @@ BuildRequestRemoteToolset = Callable[[RequestRemoteMcpServerBinding], AbstractTo
 
 @dataclass(frozen=True, slots=True)
 class _ServerInventory:
-    toolset: AbstractToolset[Any]
+    backend: McpExecutionBackend
     tool_map: dict[str, McpToolInfo]
     secret_values: tuple[str, ...]
-    mcp_tools_by_name: dict[str, ToolsetTool[Any]]
 
 
 def build_request_remote_toolset(
     binding: RequestRemoteMcpServerBinding,
 ) -> AbstractToolset[Any]:
+    """Default request-remote builder; tests patch this seam at resolver scope."""
+
     return build_fastmcp_toolset_from_server_entry(
         server_label=binding.server_label,
         server_entry={
@@ -67,9 +72,14 @@ async def resolve_mcp_declarations(
     builtin_mcp_runtime_client: BuiltinMcpRuntimeClient | None,
     request_remote_enabled: bool,
     request_remote_url_checks_enabled: bool,
-    request_remote_toolset_builder: BuildRequestRemoteToolset = build_request_remote_toolset,
+    request_remote_toolset_builder: BuildRequestRemoteToolset | None = None,
 ) -> dict[str, ResolvedMcpServerTools]:
+    """Resolve MCP declarations into inventories and execution backends."""
+
     resolved_servers: dict[str, ResolvedMcpServerTools] = {}
+    effective_request_remote_toolset_builder = (
+        request_remote_toolset_builder or build_request_remote_toolset
+    )
 
     for server_label, declaration in declarations.items():
         if declaration.connector_id is not None:
@@ -100,7 +110,7 @@ async def resolve_mcp_declarations(
                 declaration=declaration,
                 request_remote_enabled=request_remote_enabled,
                 request_remote_url_checks_enabled=request_remote_url_checks_enabled,
-                request_remote_toolset_builder=request_remote_toolset_builder,
+                request_remote_toolset_builder=effective_request_remote_toolset_builder,
             )
 
         allowed_tool_infos = _select_allowed_tool_infos(
@@ -114,10 +124,9 @@ async def resolve_mcp_declarations(
 
         resolved_servers[server_label] = ResolvedMcpServerTools(
             mode=mode,
-            mcp_toolset=inventory.toolset,
+            backend=inventory.backend,
             secret_values=inventory.secret_values,
             allowed_tool_infos=allowed_tool_infos,
-            allowed_mcp_tools_by_name=inventory.mcp_tools_by_name,
         )
 
     return resolved_servers
@@ -134,7 +143,11 @@ async def _resolve_builtin_server(
         )
 
     try:
-        tool_infos = await builtin_mcp_runtime_client.list_tools(server_label)
+        backend = ManagedMcpBackend(
+            server_label=server_label,
+            runtime_client=builtin_mcp_runtime_client,
+        )
+        runtime_tool_map = await backend.list_tools()
     except BuiltinMcpRuntimeUnknownServerError as exc:
         raise BadInputError(f"Unknown MCP server_label: {server_label}") from exc
     except BuiltinMcpRuntimeUnavailableServerError as exc:
@@ -147,17 +160,10 @@ async def _resolve_builtin_server(
         raise BadInputError(
             f"MCP tool inventory resolution failed for server {server_label!r}: {exc}"
         ) from exc
-
-    runtime_tool_map = {tool.name: tool for tool in tool_infos}
-    toolset = BuiltinMcpRuntimeToolset(
-        server_label=server_label,
-        runtime_client=builtin_mcp_runtime_client,
-    )
     return _ServerInventory(
-        toolset=toolset,
+        backend=backend,
         tool_map=runtime_tool_map,
         secret_values=(),
-        mcp_tools_by_name={},
     )
 
 
@@ -181,7 +187,6 @@ async def _resolve_request_remote_server(
         request_headers=declaration.headers,
     )
     binding = RequestRemoteMcpServerBinding(
-        mode="request_remote",
         server_label=server_label,
         server_url=declaration.server_url,
         authorization=declaration.authorization,
@@ -193,8 +198,12 @@ async def _resolve_request_remote_server(
     )
     try:
         mcp_toolset = request_remote_toolset_builder(binding)
-        mcp_tools = await mcp_toolset.get_tools(ctx=None)
-        runtime_tool_map = extract_mcp_tool_infos(mcp_tools)
+        backend = RequestRemoteMcpBackend(
+            server_label=server_label,
+            toolset=mcp_toolset,
+            secret_values=secret_values,
+        )
+        runtime_tool_map = await backend.list_tools()
     except BadInputError:
         raise
     except Exception as exc:
@@ -207,10 +216,9 @@ async def _resolve_request_remote_server(
         ) from exc
 
     return _ServerInventory(
-        toolset=mcp_toolset,
+        backend=backend,
         tool_map=runtime_tool_map,
         secret_values=secret_values,
-        mcp_tools_by_name=dict(mcp_tools),
     )
 
 

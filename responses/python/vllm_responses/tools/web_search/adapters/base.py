@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from vllm_responses.mcp.runtime_client import BuiltinMcpRuntimeClient
-from vllm_responses.tools.base.types import RuntimeRequirement
+from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
 from vllm_responses.tools.web_search.types import (
     ActionOutcome,
     OpenPageActionResult,
@@ -46,7 +44,3 @@ class OpenPageAdapter(Protocol):
         url: str,
         options: WebSearchRequestOptions,
     ) -> ActionOutcome[OpenPageActionResult]: ...
-
-
-def builtin_mcp_requirement(server_label: str) -> Sequence[RuntimeRequirement]:
-    return (RuntimeRequirement(kind="builtin_mcp_server", key=server_label),)

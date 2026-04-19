@@ -2,18 +2,15 @@ from __future__ import annotations
 
 import httpx
 import pytest
-from pydantic import TypeAdapter
-from pydantic_ai.tools import ToolDefinition
-from pydantic_ai.toolsets.abstract import ToolsetTool
 
-from vllm_responses.mcp.runtime_client import (
+from vllm_responses.tools.mcp.backend import ManagedMcpBackend
+from vllm_responses.tools.mcp.runtime_client import (
     MCP_TOOL_NOT_FOUND_PREFIX,
     BuiltinMcpRuntimeClient,
     BuiltinMcpRuntimeToolMissingError,
     BuiltinMcpRuntimeTransportError,
     BuiltinMcpRuntimeUnknownServerError,
 )
-from vllm_responses.mcp.runtime_toolset import BuiltinMcpRuntimeToolset
 
 
 @pytest.mark.anyio
@@ -165,7 +162,7 @@ async def test_runtime_client_parses_success_payloads() -> None:
 
 
 @pytest.mark.anyio
-async def test_runtime_toolset_raises_runtimeerror_on_missing_tool() -> None:
+async def test_hosted_backend_maps_missing_tool_to_item_failure_result() -> None:
     def _handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/internal/mcp/servers/docs/tools/search/call":
             return httpx.Response(
@@ -195,16 +192,10 @@ async def test_runtime_toolset_raises_runtimeerror_on_missing_tool() -> None:
     client._http = httpx.AsyncClient(
         transport=httpx.MockTransport(_handler), base_url="http://runtime"
     )  # type: ignore[attr-defined]
-    toolset = BuiltinMcpRuntimeToolset(server_label="docs", runtime_client=client)
-    args_validator = TypeAdapter(dict[str, object]).validator
-    tool = ToolsetTool(
-        toolset=toolset,
-        tool_def=ToolDefinition(name="search", parameters_json_schema={"type": "object"}),
-        max_retries=0,
-        args_validator=args_validator,
-    )
+    backend = ManagedMcpBackend(server_label="docs", runtime_client=client)
     try:
-        with pytest.raises(RuntimeError, match="not available for server"):
-            await toolset.call_tool("search", {}, ctx=None, tool=tool)
+        result = await backend.call_tool("search", {})
+        assert result.ok is False
+        assert "not available for server" in (result.error_text or "")
     finally:
         await client._http.aclose()  # type: ignore[attr-defined]

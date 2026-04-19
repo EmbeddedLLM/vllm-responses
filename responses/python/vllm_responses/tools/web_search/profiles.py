@@ -9,7 +9,6 @@ from vllm_responses.tools.base.types import (
     ProfiledBuiltinProfileResolutionProvider,
     ResolvedActionBinding,
     ResolvedProfiledBuiltinTool,
-    RuntimeRequirement,
 )
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
 from vllm_responses.tools.web_search.adapters import WEB_SEARCH_ADAPTER_SPECS
@@ -85,16 +84,11 @@ def validate_web_search_planning_descriptors() -> None:
                     f"{binding.adapter_id!r} for action {binding.action_name!r}, "
                     f"but that adapter handles {adapter_spec.action_name!r}."
                 )
-            for requirement in adapter_spec.runtime_requirements:
-                if requirement.kind != "builtin_mcp_server":
-                    raise RuntimeError(
-                        "web_search planning metadata contains an unsupported runtime "
-                        f"requirement kind {requirement.kind!r}."
-                    )
-                if requirement.key not in WEB_SEARCH_BUILTIN_MCP_SERVERS:
+            for server_label in adapter_spec.builtin_mcp_server_labels:
+                if server_label not in WEB_SEARCH_BUILTIN_MCP_SERVERS:
                     raise RuntimeError(
                         "web_search planning metadata references an unknown Built-in MCP "
-                        f"server label {requirement.key!r}."
+                        f"server label {server_label!r}."
                     )
 
 
@@ -109,17 +103,15 @@ class WebSearchProfileResolutionProvider(ProfiledBuiltinProfileResolutionProvide
             ) from exc
 
         action_bindings: list[ResolvedActionBinding] = []
-        runtime_requirements: list[RuntimeRequirement] = []
+        builtin_mcp_server_labels: set[str] = set()
         for binding in profile.action_bindings:
             adapter_spec = WEB_SEARCH_ADAPTER_SPECS[binding.adapter_id]
-            runtime_requirements.extend(adapter_spec.runtime_requirements)
+            builtin_mcp_server_labels.update(adapter_spec.builtin_mcp_server_labels)
             action_bindings.append(
                 ResolvedActionBinding(
                     action_name=binding.action_name,
                     adapter_id=binding.adapter_id,
-                    requirement_keys=tuple(
-                        requirement.key for requirement in adapter_spec.runtime_requirements
-                    ),
+                    builtin_mcp_server_labels=adapter_spec.builtin_mcp_server_labels,
                 )
             )
 
@@ -127,7 +119,7 @@ class WebSearchProfileResolutionProvider(ProfiledBuiltinProfileResolutionProvide
             tool_type=WEB_SEARCH_TOOL,
             profile_id=profile_id,
             action_bindings=tuple(action_bindings),
-            runtime_requirements=tuple(runtime_requirements),
+            builtin_mcp_server_labels=tuple(sorted(builtin_mcp_server_labels)),
         )
 
     def validate_profile(self, profile_id: str | None) -> None:
@@ -144,16 +136,9 @@ class WebSearchProfileResolutionProvider(ProfiledBuiltinProfileResolutionProvide
             return ()
 
         resolved = self.resolve(profile_id)
-        labels = tuple(
-            sorted(
-                {
-                    requirement.key
-                    for requirement in resolved.runtime_requirements
-                    if requirement.kind == "builtin_mcp_server"
-                }
-            )
+        return tuple(
+            WEB_SEARCH_BUILTIN_MCP_SERVERS[label] for label in resolved.builtin_mcp_server_labels
         )
-        return tuple(WEB_SEARCH_BUILTIN_MCP_SERVERS[label] for label in labels)
 
 
 WEB_SEARCH_PROFILE_RESOLUTION_PROVIDER = WebSearchProfileResolutionProvider()

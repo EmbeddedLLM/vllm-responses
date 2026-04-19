@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import ORJSONResponse
 
 from vllm_responses.entrypoints._state import get_vr_app_state
-from vllm_responses.mcp.runtime_client import (
+from vllm_responses.tools.mcp.runtime_client import (
     BuiltinMcpRuntimeClient,
     BuiltinMcpRuntimeTransportError,
     BuiltinMcpRuntimeUnavailableServerError,
