@@ -9,7 +9,9 @@ Embedding: [Embeddings API](https://platform.openai.com/docs/api-reference/embed
 from __future__ import annotations
 
 import json
+import shlex
 from collections import defaultdict
+from dataclasses import dataclass
 from time import time
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypedDict, Union
 
@@ -20,6 +22,7 @@ from pydantic import (
     BaseModel,
     Discriminator,
     Field,
+    PrivateAttr,
     WrapValidator,
     field_validator,
 )
@@ -32,7 +35,6 @@ from pydantic_ai import (
     ModelMessage,
     ModelRequest,
     ModelResponse,
-    SystemPromptPart,
     TextPart,
     ThinkingPart,
     Tool,
@@ -63,6 +65,44 @@ from vllm_responses.utils.exceptions import BadInputError
 
 if TYPE_CHECKING:
     from vllm_responses.tools.mcp.runtime_client import BuiltinMcpRuntimeClient
+
+
+def _codex_namespace_flat_tool_name(namespace: str, name: str) -> str:
+    return f"{namespace}{name}"
+
+
+def _codex_function_call_tool_name(call: OpenAIFunctionToolCall) -> str:
+    if call.namespace is None:
+        return call.name
+    return _codex_namespace_flat_tool_name(call.namespace, call.name)
+
+
+def _codex_custom_tool_parameters_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "string",
+                "description": "Raw custom tool input. Must match the declared Lark grammar.",
+            }
+        },
+        "required": ["input"],
+        "additionalProperties": False,
+    }
+
+
+def _is_supported_codex_custom_tool_format(tool: OpenAICustomTool) -> bool:
+    return tool.format.type == "grammar" and tool.format.syntax == "lark"
+
+
+def _codex_custom_tool_description(tool: OpenAICustomTool) -> str:
+    fragments = [tool.description.rstrip()]
+    fragments.append(
+        "Provide the raw tool input in the `input` string field. "
+        "The string must match this Lark grammar exactly:"
+    )
+    fragments.append(tool.format.definition.rstrip())
+    return "\n\n".join(fragment for fragment in fragments if fragment)
 
 
 class OpenAIConversation(BaseModel):
@@ -175,6 +215,22 @@ class OpenAIImageContent(BaseModel):
     ]
 
 
+class OpenAIEncryptedContent(BaseModel):
+    """Opaque encrypted content returned by a tool call."""
+
+    encrypted_content: Annotated[
+        str,
+        Field(description=("The encrypted content payload.")),
+    ]
+    type: Annotated[
+        Literal["encrypted_content"],
+        Field(description=("The type of the content item. Always `encrypted_content`.")),
+    ] = "encrypted_content"
+
+
+OpenAIToolOutputContent = OpenAITextContent | OpenAIImageContent | OpenAIEncryptedContent
+
+
 # class OpenAIFileContent(BaseModel):
 #     """A file input to the model."""
 
@@ -261,7 +317,7 @@ class OpenAIOutputTextContent(BaseModel):
     ] = Field(default_factory=list)
     logprobs: Annotated[
         # TODO: Define logprob structure
-        list[dict[str, Any]],
+        list[dict[str, Any]] | None,
         Field(description=("Log probability information.")),
     ] = Field(default_factory=list)
     text: Annotated[
@@ -293,15 +349,15 @@ class OpenAIOutputItem(_OpenAIMessage):
         Field(description=("The content of the output message.")),
     ]
     id: Annotated[
-        str,
+        str | None,
         Field(description=("The unique ID of the output message.")),
-    ]
+    ] = None
     role: Annotated[
         Literal["assistant"],
         Field(description=("The role of the output message. Always `assistant`.")),
     ] = "assistant"
     status: Annotated[
-        Literal["in_progress", "completed", "incomplete"],
+        Literal["in_progress", "completed", "incomplete"] | None,
         Field(
             description=(
                 "The status of item. "
@@ -309,7 +365,7 @@ class OpenAIOutputItem(_OpenAIMessage):
                 "Populated when items are returned via API."
             ),
         ),
-    ]
+    ] = None
 
 
 class OpenAIReasoningContent(BaseModel):
@@ -346,9 +402,9 @@ class OpenAIReasoningItem(BaseModel):
     """
 
     id: Annotated[
-        str,
+        str | None,
         Field(description=("The unique identifier of the reasoning content.")),
-    ]
+    ] = None
     summary: Annotated[
         list[OpenAIReasoningSummary],
         Field(description=("Reasoning summary content.")),
@@ -399,6 +455,10 @@ class OpenAIFunctionToolCall(BaseModel):
         str,
         Field(description=("The name of the function to run.")),
     ]
+    namespace: Annotated[
+        str | None,
+        Field(description=("Optional namespace for Codex namespaced function tools.")),
+    ] = None
     type: Annotated[
         Literal["function_call"],
         Field(description=("The type of the function tool call. Always `function_call`.")),
@@ -423,9 +483,9 @@ class OpenAIMcpToolCall(BaseModel):
     """An MCP tool call executed by the gateway."""
 
     id: Annotated[
-        str,
+        str | None,
         Field(description=("The unique ID of the MCP tool call.")),
-    ]
+    ] = None
     server_label: Annotated[
         str,
         Field(description=("The MCP server label for this call.")),
@@ -470,7 +530,7 @@ class OpenAIFunctionToolOutput(BaseModel):
     ]
     output: Annotated[
         # str | list[OpenAITextContent | OpenAIImageContent | OpenAIFileContent]
-        str | list[OpenAITextContent | OpenAIImageContent],
+        str | list[OpenAIToolOutputContent],
         Field(description=("Text, image, or file output of the function tool call.")),
     ]
     type: Annotated[
@@ -499,6 +559,210 @@ class OpenAIFunctionToolOutput(BaseModel):
                 "Populated when items are returned via API."
             ),
         ),
+    ] = None
+
+
+class OpenAICustomToolCall(BaseModel):
+    """A Codex custom/freeform tool call replay item."""
+
+    call_id: Annotated[
+        str,
+        Field(description=("The unique ID of the custom tool call generated by the model.")),
+    ]
+    name: Annotated[
+        str,
+        Field(description=("The custom tool name.")),
+    ]
+    input: Annotated[
+        str,
+        Field(description=("The raw freeform input passed to the custom tool.")),
+    ]
+    type: Annotated[
+        Literal["custom_tool_call"],
+        Field(description=("The type of the custom tool call. Always `custom_tool_call`.")),
+    ] = "custom_tool_call"
+    id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the custom tool call.")),
+    ] = None
+    status: Annotated[
+        str | None,
+        Field(description=("The status of the custom tool call.")),
+    ] = None
+
+
+class OpenAICustomToolCallOutput(BaseModel):
+    """The output of a Codex custom/freeform tool call."""
+
+    call_id: Annotated[
+        str,
+        Field(description=("The unique ID of the custom tool call generated by the model.")),
+    ]
+    output: Annotated[
+        str | list[OpenAIToolOutputContent],
+        Field(description=("Text or structured content output of the custom tool call.")),
+    ]
+    type: Annotated[
+        Literal["custom_tool_call_output"],
+        Field(
+            description=(
+                "The type of the custom tool call output. Always `custom_tool_call_output`."
+            )
+        ),
+    ] = "custom_tool_call_output"
+    name: Annotated[
+        str | None,
+        Field(description=("The custom tool name, when Codex includes it on replay.")),
+    ] = None
+
+
+class OpenAICustomToolFormat(BaseModel):
+    """Format declaration for a Codex custom/freeform tool."""
+
+    # Codex compatibility checkpoint: openai/codex 8f1aad5 (2026-06-08)
+    # defines FreeformToolFormat with all three fields required.
+    # Unsupported custom formats should be ignored below only after they match
+    # this current Codex freeform-tool envelope.
+    type: Annotated[
+        str,
+        Field(description="The custom tool format type, for example `grammar`."),
+    ]
+    syntax: Annotated[
+        str,
+        Field(description="The custom tool format syntax, for example `lark`."),
+    ]
+    definition: Annotated[
+        str,
+        Field(description="The custom tool format definition."),
+    ]
+
+
+class OpenAICustomTool(BaseModel):
+    """Codex custom/freeform tool declaration."""
+
+    type: Annotated[
+        Literal["custom"],
+        Field(description="The tool type. Always `custom`."),
+    ] = "custom"
+    name: Annotated[
+        str,
+        Field(description="The custom tool name."),
+    ]
+    description: Annotated[
+        str,
+        Field(description="Description of the custom tool."),
+    ]
+    format: Annotated[
+        OpenAICustomToolFormat,
+        Field(description="Freeform output format for the custom tool."),
+    ]
+
+
+class OpenAIToolSearchCall(BaseModel):
+    """A Codex tool-search call replay item."""
+
+    execution: Annotated[
+        str,
+        Field(description=("The tool-search execution mode, usually `client` or `server`.")),
+    ]
+    arguments: Annotated[
+        Any,
+        Field(description=("The arbitrary JSON arguments passed to the tool-search call.")),
+    ]
+    type: Annotated[
+        Literal["tool_search_call"],
+        Field(description=("The type of the tool-search call. Always `tool_search_call`.")),
+    ] = "tool_search_call"
+    call_id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the tool-search call.")),
+    ] = None
+    id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the tool-search item.")),
+    ] = None
+    status: Annotated[
+        str | None,
+        Field(description=("The status of the tool-search call.")),
+    ] = None
+
+
+class OpenAIToolSearchOutput(BaseModel):
+    """The output of a Codex tool-search replay item."""
+
+    status: Annotated[
+        str,
+        Field(description=("The status of the tool-search output.")),
+    ]
+    execution: Annotated[
+        str,
+        Field(description=("The tool-search execution mode, usually `client` or `server`.")),
+    ]
+    tools: Annotated[
+        list[Any],
+        Field(description=("The tools returned by tool search.")),
+    ]
+    type: Annotated[
+        Literal["tool_search_output"],
+        Field(description=("The type of the tool-search output. Always `tool_search_output`.")),
+    ] = "tool_search_output"
+    call_id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the tool-search call.")),
+    ] = None
+
+
+class OpenAILocalShellExecAction(BaseModel):
+    """A Codex local shell execution action."""
+
+    command: Annotated[
+        list[str],
+        Field(description=("The argv-style command executed by Codex.")),
+    ]
+    type: Annotated[
+        Literal["exec"],
+        Field(description=("The type of the local shell action. Always `exec`.")),
+    ] = "exec"
+    timeout_ms: Annotated[
+        int | None,
+        Field(description=("The requested execution timeout in milliseconds.")),
+    ] = None
+    working_directory: Annotated[
+        str | None,
+        Field(description=("The working directory for the command.")),
+    ] = None
+    env: Annotated[
+        dict[str, str] | None,
+        Field(description=("Environment variables supplied for the command.")),
+    ] = None
+    user: Annotated[
+        str | None,
+        Field(description=("The user requested for the command.")),
+    ] = None
+
+
+class OpenAILocalShellCall(BaseModel):
+    """A Codex local shell call replay item."""
+
+    status: Annotated[
+        str,
+        Field(description=("The local shell call status.")),
+    ]
+    action: Annotated[
+        OpenAILocalShellExecAction,
+        Field(description=("The local shell action.")),
+    ]
+    type: Annotated[
+        Literal["local_shell_call"],
+        Field(description=("The type of the local shell call. Always `local_shell_call`.")),
+    ] = "local_shell_call"
+    call_id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the local shell call.")),
+    ] = None
+    id: Annotated[
+        str | None,
+        Field(description=("The unique ID of the local shell call.")),
     ] = None
 
 
@@ -540,9 +804,9 @@ class OpenAICodeToolCall(BaseModel):
         Field(description=("The ID of the container used to run the code.")),
     ]
     id: Annotated[
-        str,
+        str | None,
         Field(description=("The unique ID of the code interpreter tool call.")),
-    ]
+    ] = None
     outputs: Annotated[
         list[OpenAICodeOutputLog | OpenAICodeOutputImage] | None,
         Field(
@@ -638,9 +902,9 @@ class OpenAIWebSearchToolCall(BaseModel):
         | None
     ) = None
     id: Annotated[
-        str,
+        str | None,
         Field(description="The unique ID of the web search tool call."),
-    ]
+    ] = None
     status: Annotated[
         Literal["in_progress", "completed", "incomplete", "failed"],
         Field(description="The status of the web search tool call."),
@@ -660,6 +924,11 @@ vLLMInput = Union[
             OpenAIReasoningItem,
             OpenAIFunctionToolCall,
             OpenAIFunctionToolOutput,
+            OpenAICustomToolCall,
+            OpenAICustomToolCallOutput,
+            OpenAIToolSearchCall,
+            OpenAIToolSearchOutput,
+            OpenAILocalShellCall,
             OpenAIMcpToolCall,
             OpenAICodeToolCall,
             OpenAIWebSearchToolCall,
@@ -672,12 +941,47 @@ vLLMOutput = Annotated[
         OpenAIOutputItem,
         OpenAIReasoningItem,
         OpenAIFunctionToolCall,
+        OpenAICustomToolCall,
         OpenAIMcpToolCall,
         OpenAICodeToolCall,
         OpenAIWebSearchToolCall,
     ],
     Discriminator("type"),
 ]
+
+
+def _tool_output_as_text(output: str | list[OpenAIToolOutputContent]) -> str:
+    if isinstance(output, str):
+        return output
+    return json.dumps(
+        [content_item.model_dump(mode="python") for content_item in output],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _local_shell_exec_args(action: OpenAILocalShellExecAction) -> dict[str, Any]:
+    args: dict[str, Any] = {"cmd": shlex.join(action.command)}
+    if action.working_directory is not None:
+        args["workdir"] = action.working_directory
+    return args
+
+
+def _tool_search_payload(msg: OpenAIToolSearchCall | OpenAIToolSearchOutput) -> dict[str, Any]:
+    payload = msg.model_dump(mode="python", exclude_none=True)
+    return payload
+
+
+def _tool_search_payload_text(msg: OpenAIToolSearchCall | OpenAIToolSearchOutput) -> str:
+    return json.dumps(
+        _tool_search_payload(msg),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _replay_payload_text(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 class OpenAIPromptTemplate(BaseModel):
@@ -1057,16 +1361,21 @@ def _build_required_tool_choice_instruction(
     )
 
 
-def _merge_internal_instructions(
-    *,
-    user_instructions: str | None,
-    internal_instruction: str | None,
-) -> str | None:
-    if not internal_instruction:
-        return user_instructions
-    if not user_instructions:
-        return internal_instruction
-    return f"{user_instructions.rstrip()}\n\n{internal_instruction}"
+def _instruction_text_from_system_like_content(
+    role: str,
+    content: str | list[OpenAITextContent | OpenAIImageContent],
+) -> str:
+    if isinstance(content, str):
+        return content
+
+    text_parts: list[str] = []
+    for item in content:
+        if not isinstance(item, OpenAITextContent):
+            raise BadInputError(
+                f"{role.capitalize()} message content must be text-only when used as instructions."
+            )
+        text_parts.append(item.text)
+    return "\n".join(text_parts)
 
 
 OpenAIToolChoice = Union[
@@ -1110,6 +1419,14 @@ class AgentRunSettings(TypedDict):
     instructions: str | None
     toolsets: list[AbstractToolset[Any]] | None
     usage_limits: UsageLimits
+
+
+@dataclass(frozen=True, slots=True)
+class CodexCompatContext:
+    """Per-request codex compatibility state, computed from request tool definitions."""
+
+    namespace_tool_map: dict[str, tuple[str, str]]
+    custom_tool_names: set[str]
 
 
 class OpenAIResponsesFunctionTool(BaseModel):
@@ -1205,6 +1522,52 @@ class OpenAIResponsesMcpTool(BaseModel):
         str | None,
         Field(description="Approval policy for MCP calls. Only `never` is supported."),
     ] = None
+
+
+class OpenAINamespaceFunctionTool(BaseModel):
+    """Function tool nested inside a Codex namespace container."""
+
+    type: Annotated[
+        Literal["function"],
+        Field(description="The nested tool type. Always `function`."),
+    ] = "function"
+    name: Annotated[
+        str,
+        Field(description="The short function name inside the namespace."),
+    ]
+    description: Annotated[
+        str | None,
+        Field(description="Description of the nested function tool."),
+    ] = None
+    parameters: Annotated[
+        JsonSchema,
+        Field(description="A JSON schema object describing the function parameters."),
+    ] = Field(default_factory=lambda: {"type": "object"})
+    strict: Annotated[
+        bool,
+        Field(description="Whether to enforce strict parameter validation."),
+    ] = True
+
+
+class OpenAINamespaceTool(BaseModel):
+    """Codex namespace tool declaration; a container for nested function tools."""
+
+    type: Annotated[
+        Literal["namespace"],
+        Field(description="The tool type. Always `namespace`."),
+    ] = "namespace"
+    name: Annotated[
+        str,
+        Field(description="The namespace prefix used by Codex for nested tools."),
+    ]
+    description: Annotated[
+        str | None,
+        Field(description="Description of the namespace container."),
+    ] = None
+    tools: Annotated[
+        list[OpenAINamespaceFunctionTool],
+        Field(description="Nested function tools in this namespace."),
+    ] = Field(default_factory=list)
 
 
 class OpenAIResponsesWebSearchFilters(BaseModel):
@@ -1334,14 +1697,18 @@ vLLMResponsesTool = Annotated[
     vLLMResponsesCodeTool
     | OpenAIResponsesWebSearchTool
     | OpenAIResponsesFunctionTool
-    | OpenAIResponsesMcpTool,
+    | OpenAIResponsesMcpTool
+    | OpenAICustomTool
+    | OpenAINamespaceTool,
     Field(discriminator="type", description="The type of tool."),
 ]
 OpenAIResponsesTool = Annotated[
     OpenAIResponsesWebSearchTool
     | OpenAIResponsesCodeTool
     | OpenAIResponsesFunctionTool
-    | OpenAIResponsesMcpTool,
+    | OpenAIResponsesMcpTool
+    | OpenAICustomTool
+    | OpenAINamespaceTool,
     Field(discriminator="type", description="The type of tool."),
 ]
 
@@ -1361,6 +1728,15 @@ class OpenAIStreamOptions(BaseModel):
 
 
 class vLLMResponsesRequest(BaseModel):
+    _effective_system_instruction: str | None = PrivateAttr(default=None)
+    _codex_compat_context: CodexCompatContext = PrivateAttr(
+        default_factory=lambda: CodexCompatContext(namespace_tool_map={}, custom_tool_names=set())
+    )
+
+    @property
+    def codex_compat_context(self) -> CodexCompatContext:
+        return self._codex_compat_context
+
     input: Annotated[
         str | list[vLLMInput],
         Field(
@@ -1538,7 +1914,6 @@ class vLLMResponsesRequest(BaseModel):
                 "An array of tools the model may call while generating a response. "
                 "You can specify which tool to use by setting the `tool_choice` parameter."
             ),
-            min_length=1,
             examples=[
                 [
                     vLLMResponsesCodeTool(),
@@ -1601,6 +1976,8 @@ class vLLMResponsesRequest(BaseModel):
             for t in v:
                 if isinstance(t, OpenAIResponsesFunctionTool):
                     tool_name = t.name
+                elif isinstance(t, OpenAICustomTool):
+                    tool_name = t.name
                 elif isinstance(t, vLLMResponsesCodeTool):
                     tool_name = t.type
                 elif isinstance(t, OpenAIResponsesWebSearchTool):
@@ -1608,6 +1985,10 @@ class vLLMResponsesRequest(BaseModel):
                 elif isinstance(t, OpenAIResponsesMcpTool):
                     # MCP duplicate-by-server validation is handled in `as_run_settings(...)` where request-level
                     # validation can include runtime manager availability checks.
+                    continue
+                elif isinstance(t, OpenAINamespaceTool):
+                    # Namespace containers are not directly callable. Their nested
+                    # function names are validated after flattening in `as_run_settings(...)`.
                     continue
                 else:
                     raise ValueError(f"Invalid tool type: {type(t)}")
@@ -1631,22 +2012,38 @@ class vLLMResponsesRequest(BaseModel):
         builtin_mcp_runtime_client: BuiltinMcpRuntimeClient | None = None,
         request_remote_enabled: bool,
         request_remote_url_checks_enabled: bool,
-    ) -> tuple[AgentRunSettings, list[Tool], dict[str, McpToolRef]]:
+    ) -> tuple[
+        AgentRunSettings,
+        list[Tool],
+        dict[str, McpToolRef],
+        CodexCompatContext,
+    ]:
         """
         Converts the request into a dictionary of run settings for Pydantic AI.
 
         Notes:
 
-        If system prompt is "A" and instructions is "B", then pydantic ai will form this history:
+        System and developer messages are folded into the leading instruction text,
+        after top-level `instructions`, after any canonical system instruction from
+        `previous_response_id` rehydration, and before internal gateway instructions.
+        This keeps OpenAI/Codex authority ordering while avoiding later `system`
+        messages that some OSS chat templates reject.
+
+        If top-level `instructions` is "B", a system/developer input message is
+        "A", and the user input is "Hi.", the gateway passes Pydantic AI:
+
         ```yaml
-        messages:
-        - content: A
-        role: system
-        - content: B
-        role: system
-        - content: Hi.
-        role: user
+        instructions: |-
+          B
+
+          A
+        message_history:
+        - role: user
+          content: Hi.
         ```
+
+        It does not append the system/developer input as a separate
+        `SystemPromptPart` in `message_history`.
         """
         mcp_tool_name_map: dict[str, McpToolRef] = {}
 
@@ -1667,6 +2064,7 @@ class vLLMResponsesRequest(BaseModel):
         # Process chat history
         # `previous_response_id` hydration is implemented in Layer 4 (ResponseStore). This method expects
         # `self.input` to already include any prior context/tool outputs that should be part of the upstream prompt.
+        request_input_instruction_fragments: list[str] = []
         if isinstance(self.input, str):
             message_history = [
                 ModelRequest(parts=[UserPromptPart(content=self.input)]),
@@ -1676,11 +2074,15 @@ class vLLMResponsesRequest(BaseModel):
             for msg in self.input:
                 if isinstance(msg, (OpenAIInputMessage, OpenAIInputItem)):
                     if msg.role in ("system", "developer"):
-                        if not isinstance(msg.content, str):
-                            # NOTE: Can system prompt be non-string?
-                            raise BadInputError("System prompt must be a string.")
-                        message_history.append(
-                            ModelRequest(parts=[SystemPromptPart(content=msg.content)])
+                        # Preserve system/developer authority by folding request-input
+                        # instruction text into Pydantic AI `instructions`. The OpenAI
+                        # chat backend renders that as the leading system prompt, so a
+                        # request with only a system input still reaches OSS models as
+                        # system-level text. Do not add a separate SystemPromptPart to
+                        # message history; OSS chat templates may reject repeated or
+                        # non-leading system messages.
+                        request_input_instruction_fragments.append(
+                            _instruction_text_from_system_like_content(msg.role, msg.content)
                         )
                         continue
 
@@ -1750,6 +2152,9 @@ class vLLMResponsesRequest(BaseModel):
                     continue
 
                 if isinstance(msg, OpenAIReasoningItem):
+                    if not msg.content and not msg.summary and not msg.encrypted_content:
+                        continue
+
                     msg_id = msg.id
                     content = "".join(c.text for c in msg.content)
                     if not content and (not msg.encrypted_content) and msg.summary:
@@ -1777,11 +2182,12 @@ class vLLMResponsesRequest(BaseModel):
 
                 if isinstance(msg, OpenAIFunctionToolCall):
                     msg_id = msg.id
+                    tool_name = _codex_function_call_tool_name(msg)
                     message_history.append(
                         ModelResponse(
                             parts=[
                                 ToolCallPart(
-                                    tool_name=msg.name,
+                                    tool_name=tool_name,
                                     args=msg.arguments,
                                     tool_call_id=msg.call_id,
                                     id=msg_id,
@@ -1793,35 +2199,150 @@ class vLLMResponsesRequest(BaseModel):
                     continue
 
                 if isinstance(msg, OpenAIFunctionToolOutput):
-                    tool_name: str = next(
-                        (
-                            i.name
-                            for i in self.input
-                            if isinstance(i, OpenAIFunctionToolCall) and i.call_id == msg.call_id
-                        ),
-                        "",
-                    )
-                    tool_output: str
-                    if isinstance(msg.output, str):
-                        tool_output = msg.output
-                    else:
-                        tool_output = json.dumps(
-                            [c.model_dump(mode="python") for c in msg.output],
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        )
+                    tool_name = ""
+                    for item in self.input:
+                        if (
+                            isinstance(item, OpenAIFunctionToolCall)
+                            and item.call_id == msg.call_id
+                        ):
+                            tool_name = _codex_function_call_tool_name(item)
+                            break
+                        if isinstance(item, OpenAILocalShellCall) and item.call_id == msg.call_id:
+                            # Codex replays local shell execution as a local_shell_call
+                            # followed by a regular function_call_output with the same
+                            # call_id, so the output must resolve to the synthetic
+                            # exec_command call below.
+                            tool_name = "exec_command"
+                            break
+                    tool_output = _tool_output_as_text(msg.output)
                     message_history.append(
                         ModelRequest(
                             parts=[
                                 ToolReturnPart(
                                     tool_name=tool_name,
-                                    # TODO: Handle list[OpenAITextContent | OpenAIImageContent]
                                     content=tool_output,
                                     tool_call_id=msg.call_id,
                                 ),
                             ]
                         )
                     )
+                    continue
+
+                if isinstance(msg, OpenAICustomToolCall):
+                    message_history.append(
+                        ModelResponse(
+                            parts=[
+                                TextPart(
+                                    content=_replay_payload_text(
+                                        msg.model_dump(mode="python", exclude_none=True)
+                                    ),
+                                    id=msg.id,
+                                )
+                            ],
+                        )
+                    )
+                    continue
+
+                if isinstance(msg, OpenAICustomToolCallOutput):
+                    message_history.append(
+                        ModelResponse(
+                            parts=[
+                                TextPart(
+                                    content=_replay_payload_text(
+                                        {
+                                            "type": msg.type,
+                                            "call_id": msg.call_id,
+                                            "name": msg.name,
+                                            "output": _tool_output_as_text(msg.output),
+                                        }
+                                    ),
+                                    id=None,
+                                )
+                            ]
+                        )
+                    )
+                    continue
+
+                if isinstance(msg, OpenAIToolSearchCall):
+                    if msg.execution == "client" and msg.call_id is not None:
+                        message_history.append(
+                            ModelResponse(
+                                parts=[
+                                    ToolCallPart(
+                                        tool_name="tool_search",
+                                        args=msg.arguments,
+                                        tool_call_id=msg.call_id,
+                                        id=msg.id,
+                                    )
+                                ],
+                            )
+                        )
+                    else:
+                        message_history.append(
+                            ModelResponse(
+                                parts=[
+                                    TextPart(
+                                        content=_tool_search_payload_text(msg),
+                                        id=msg.id,
+                                    )
+                                ]
+                            )
+                        )
+                    continue
+
+                if isinstance(msg, OpenAIToolSearchOutput):
+                    if msg.execution == "client" and msg.call_id is not None:
+                        message_history.append(
+                            ModelRequest(
+                                parts=[
+                                    ToolReturnPart(
+                                        tool_name="tool_search",
+                                        content=_tool_search_payload_text(msg),
+                                        tool_call_id=msg.call_id,
+                                    ),
+                                ]
+                            )
+                        )
+                    else:
+                        message_history.append(
+                            ModelResponse(
+                                parts=[
+                                    TextPart(
+                                        content=_tool_search_payload_text(msg),
+                                        id=None,
+                                    )
+                                ]
+                            )
+                        )
+                    continue
+
+                if isinstance(msg, OpenAILocalShellCall):
+                    if msg.call_id is None:
+                        message_history.append(
+                            ModelResponse(
+                                parts=[
+                                    TextPart(
+                                        content=_replay_payload_text(
+                                            msg.model_dump(mode="python", exclude_none=True),
+                                        ),
+                                        id=msg.id,
+                                    )
+                                ],
+                            )
+                        )
+                    else:
+                        message_history.append(
+                            ModelResponse(
+                                parts=[
+                                    ToolCallPart(
+                                        tool_name="exec_command",
+                                        args=_local_shell_exec_args(msg.action),
+                                        tool_call_id=msg.call_id,
+                                        id=msg.id,
+                                    )
+                                ],
+                            )
+                        )
                     continue
 
                 if isinstance(msg, OpenAICodeToolCall):
@@ -1918,6 +2439,9 @@ class vLLMResponsesRequest(BaseModel):
         # spans built-ins, custom function tools, and MCP.
         builtin_tools: list[Tool] = []
         deferred_tools: list[ToolDefinition] = []
+        deferred_tool_names: set[str] = set()
+        codex_namespace_tool_map: dict[str, tuple[str, str]] = {}
+        codex_custom_tool_names: set[str] = set()
         mcp_declarations: dict[str, OpenAIResponsesMcpTool] = {}
         mcp_servers: dict[str, ResolvedMcpServerTools] = {}
         selected_mcp_tool_infos_by_server: dict[str, dict[str, McpToolInfo]] = {}
@@ -1929,6 +2453,9 @@ class vLLMResponsesRequest(BaseModel):
                             raise BadInputError(
                                 f"Function tool names starting with {HOSTED_MCP_INTERNAL_PREFIX!r} are reserved."
                             )
+                        if t.name in deferred_tool_names:
+                            raise BadInputError(f"Duplicate function tool name: {t.name!r}.")
+                        deferred_tool_names.add(t.name)
                         deferred_tools.append(
                             ToolDefinition(
                                 name=t.name,
@@ -1941,6 +2468,41 @@ class vLLMResponsesRequest(BaseModel):
                         builtin_tools.append(TOOLS[CODE_INTERPRETER_TOOL])
                     case OpenAIResponsesWebSearchTool():
                         builtin_tools.append(TOOLS[WEB_SEARCH_TOOL])
+                    case OpenAICustomTool():
+                        if not _is_supported_codex_custom_tool_format(t):
+                            continue
+                        if t.name in deferred_tool_names:
+                            raise BadInputError(f"Duplicate function tool name: {t.name!r}.")
+                        deferred_tool_names.add(t.name)
+                        codex_custom_tool_names.add(t.name)
+                        deferred_tools.append(
+                            ToolDefinition(
+                                name=t.name,
+                                parameters_json_schema=_codex_custom_tool_parameters_schema(),
+                                strict=True,
+                                description=_codex_custom_tool_description(t),
+                            )
+                        )
+                    case OpenAINamespaceTool():
+                        # Codex uses `namespace` as a model-visible container, but
+                        # pydantic-ai/vLLM expect one flat callable name.
+                        for inner_tool in t.tools:
+                            flat_name = _codex_namespace_flat_tool_name(t.name, inner_tool.name)
+                            if flat_name in deferred_tool_names:
+                                raise BadInputError(
+                                    "Duplicate function tool name after namespace "
+                                    f"flattening: {flat_name!r}."
+                                )
+                            deferred_tool_names.add(flat_name)
+                            codex_namespace_tool_map[flat_name] = (t.name, inner_tool.name)
+                            deferred_tools.append(
+                                ToolDefinition(
+                                    name=flat_name,
+                                    parameters_json_schema=inner_tool.parameters,
+                                    strict=inner_tool.strict,
+                                    description=inner_tool.description,
+                                )
+                            )
                     case OpenAIResponsesMcpTool():
                         if t.server_label in mcp_declarations:
                             raise BadInputError(
@@ -2014,7 +2576,8 @@ class vLLMResponsesRequest(BaseModel):
             )
         elif isinstance(self.tool_choice, OpenAIFunctionToolChoice):
             builtin_tools = []
-            deferred_tools = [t for t in deferred_tools if t.name == self.tool_choice.name]
+            selected_tool_name = self.tool_choice.name
+            deferred_tools = [t for t in deferred_tools if t.name == selected_tool_name]
             if not deferred_tools:
                 raise BadInputError(
                     f"`tool_choice.name` {self.tool_choice.name!r} is not present in effective tools."
@@ -2023,7 +2586,7 @@ class vLLMResponsesRequest(BaseModel):
             selected_mcp_tool_infos_by_server = {}
             internal_tool_choice_instruction = _build_required_tool_choice_instruction(
                 kind="function",
-                function_name=self.tool_choice.name,
+                function_name=selected_tool_name,
             )
         elif isinstance(self.tool_choice, OpenAIMcpToolChoice):
             if not mcp_servers:
@@ -2056,6 +2619,20 @@ class vLLMResponsesRequest(BaseModel):
         else:
             raise BadInputError(f"Invalid `tool_choice` provided: {self.tool_choice}.")
 
+        effective_deferred_tool_names = {tool.name for tool in deferred_tools}
+        codex_namespace_tool_map = {
+            name: ref
+            for name, ref in codex_namespace_tool_map.items()
+            if name in effective_deferred_tool_names
+        }
+        codex_custom_tool_names = {
+            name for name in codex_custom_tool_names if name in effective_deferred_tool_names
+        }
+        self._codex_compat_context = CodexCompatContext(
+            namespace_tool_map=codex_namespace_tool_map,
+            custom_tool_names=codex_custom_tool_names,
+        )
+
         mcp_toolset = build_mcp_toolset_for_request(
             mcp_servers=mcp_servers,
             selected_mcp_tool_infos_by_server=selected_mcp_tool_infos_by_server,
@@ -2068,19 +2645,31 @@ class vLLMResponsesRequest(BaseModel):
             toolsets.append(mcp_toolset)
         if deferred_tools:
             toolsets.append(ExternalToolset(tool_defs=deferred_tools))
+        instruction_fragments = [
+            self.instructions,
+            self._effective_system_instruction,
+            *request_input_instruction_fragments,
+            internal_tool_choice_instruction,
+        ]
+        instructions = (
+            "\n\n".join(fragment.rstrip() for fragment in instruction_fragments if fragment)
+            or None
+        )
         run_settings: AgentRunSettings = {
             "message_history": message_history,
-            "instructions": _merge_internal_instructions(
-                user_instructions=self.instructions,
-                internal_instruction=internal_tool_choice_instruction,
-            ),
+            "instructions": instructions,
             "toolsets": toolsets or None,
             # Parity note: do not enforce request `max_tool_calls` in pydantic_ai runtime limits.
             # Keep `max_tool_calls` as request/response metadata only, matching observed OpenAI behavior.
             # Preserve pydantic_ai default request_limit safety guard for non-terminating loops.
             "usage_limits": UsageLimits(tool_calls_limit=None),
         }
-        return run_settings, builtin_tools, mcp_tool_name_map
+        return (
+            run_settings,
+            builtin_tools,
+            mcp_tool_name_map,
+            self._codex_compat_context,
+        )
 
     def _as_chat_completion_response_format(self) -> dict[str, Any] | None:
         text_config = self.text
@@ -2140,6 +2729,11 @@ class vLLMResponsesRequest(BaseModel):
         choice = self.tool_choice
 
         if isinstance(choice, OpenAIFunctionToolChoice):
+            if not any(
+                isinstance(tool, OpenAIResponsesFunctionTool) and tool.name == choice.name
+                for tool in (self.tools or ())
+            ):
+                return None
             return OpenAIResponsesTransportFunctionToolChoice(
                 type="function",
                 name=choice.name,
@@ -2437,7 +3031,6 @@ class vLLMResponsesRequest(BaseModel):
 #                 "An array of tools the model may call while generating a response. "
 #                 "You can specify which tool to use by setting the `tool_choice` parameter."
 #             ),
-#             min_length=1,
 #             examples=[
 #                 [
 #                     OpenAIResponsesWebSearchTool(),
@@ -3013,9 +3606,10 @@ class OpenAIResponsesStreamText(_OpenAIResponsesStream):
             "response.output_text.done",
             "response.reasoning_summary_text.delta",
             "response.reasoning_summary_text.done",
-            # OpenResponses schema uses `response.reasoning.delta/done` (not `reasoning_text.*`).
             "response.reasoning.delta",
             "response.reasoning.done",
+            "response.reasoning_text.delta",
+            "response.reasoning_text.done",
             "response.refusal.delta",
             "response.refusal.done",
             "response.function_call_arguments.delta",

@@ -20,7 +20,7 @@ vllm-responses serve \
 
 ```bash
 export EXA_API_KEY="your-exa-api-key"  # optional for exa_mcp
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-web-search-profile exa_mcp
 ```
@@ -32,7 +32,7 @@ default Exa MCP URL.
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Find the official vLLM documentation site."}],
     tools=[{"type": "web_search"}],
 )
@@ -45,7 +45,7 @@ search action sources expanded in the response item.
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Find migration notes for vLLM and cite the sources."}],
     tools=[{"type": "web_search"}],
     include=["web_search_call.action.sources"],
@@ -56,7 +56,7 @@ response = client.responses.create(
 
 ```python
 with client.responses.stream(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Search for the latest vLLM release notes."}],
     tools=[{"type": "web_search"}],
     include=["web_search_call.action.sources"],

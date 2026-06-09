@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3ed2-4515-7921-be77-30084e0b3f9c
 request:
   body:
     input: Call the function get_weather for Boston and do not answer directly.
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     store: false
     stream: true
     tool_choice: auto
@@ -26,7 +26,7 @@ request:
     content-length: "389"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: qwen35a3b-responses-function-stream-auto.yaml
+    x-run-id: function-stream-auto.yaml
   method: POST
   path: /v1/responses
   query_params: {}
@@ -38,7 +38,7 @@ response:
     - "event: response.created
 
       "
-    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
 
       '
     - "
@@ -47,7 +47,7 @@ response:
     - "event: response.in_progress
 
       "
-    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
 
       '
     - "
@@ -713,7 +713,7 @@ response:
     - "event: response.completed
 
       "
-    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[{"id":"rs_80d8bf28e2c41bff","summary":[],"type":"reasoning","content":[{"text":"The user wants me to call the get_weather function for Boston and explicitly states not to answer directly. This means I should only call the function and not provide any analysis or additional text.\n\nI need to use the get_weather function with the city parameter set to \"Boston\".\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"arguments":"{\"city\": \"Boston\"}","call_id":"chatcmpl-tool-8af89b82ef336b21","name":"get_weather","type":"function_call","id":"fc_aa5f1b4dc7ab010b","namespace":null,"status":"completed"}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":304,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":84,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":388},"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":75,"type":"response.completed"}
+    - 'data: {"response":{"id":"resp_9f632fb4d7d860b6","created_at":1774875460,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[{"id":"rs_80d8bf28e2c41bff","summary":[],"type":"reasoning","content":[{"text":"The user wants me to call the get_weather function for Boston and explicitly states not to answer directly. This means I should only call the function and not provide any analysis or additional text.\n\nI need to use the get_weather function with the city parameter set to \"Boston\".\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"arguments":"{\"city\": \"Boston\"}","call_id":"chatcmpl-tool-8af89b82ef336b21","name":"get_weather","type":"function_call","id":"fc_aa5f1b4dc7ab010b","namespace":null,"status":"completed"}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"get_weather","parameters":{"type":"object","additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"]},"strict":true,"type":"function","defer_loading":null,"description":"Get weather for a location."}],"top_p":0.95,"background":false,"max_output_tokens":261840,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":304,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":84,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":388},"user":null,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":75,"type":"response.completed"}
 
       '
     - "

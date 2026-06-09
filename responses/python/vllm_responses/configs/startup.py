@@ -8,7 +8,11 @@ from typing import Any, Callable
 from pydantic import BaseModel, ConfigDict, ValidationError, ValidationInfo, field_validator
 
 from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
-from vllm_responses.configs.runtime import CodeInterpreterMode, UpstreamAPIKind
+from vllm_responses.configs.runtime import (
+    CodeInterpreterMode,
+    ReasoningEventFormat,
+    UpstreamAPIKind,
+)
 from vllm_responses.tools.ids import WEB_SEARCH_TOOL
 from vllm_responses.tools.profile_resolution import (
     profiled_builtin_requires_mcp,
@@ -18,6 +22,7 @@ from vllm_responses.tools.web_search.profiles import get_web_search_profile_ids
 
 _SUPPORTED_CODE_INTERPRETER_MODES = "{spawn,external,disabled}"
 _SUPPORTED_UPSTREAM_API_KINDS = "{chat_completions,responses}"
+_SUPPORTED_REASONING_EVENT_FORMATS = "{openai,openresponses}"
 _UPSTREAM_API_KIND_ALIASES = {
     "chat-completions": "chat_completions",
 }
@@ -68,6 +73,18 @@ RESPONSES_CLI_FLAG_SPECS = (
         help=(
             "Gateway-owned web search profile to enable. Choices: "
             f"{format_web_search_profile_choices()}."
+        ),
+    ),
+    ResponsesCliFlagSpec(
+        field_name="reasoning_event_format",
+        supervisor_flag="--reasoning-event-format",
+        supervisor_dest="reasoning_event_format",
+        integrated_flag="--responses-reasoning-event-format",
+        metavar=_SUPPORTED_REASONING_EVENT_FORMATS,
+        help=(
+            "Downstream reasoning stream event family. "
+            "Use openai for response.reasoning_text.* or "
+            "openresponses for response.reasoning.*."
         ),
     ),
     ResponsesCliFlagSpec(
@@ -142,6 +159,17 @@ RESPONSES_CLI_FLAG_SPECS = (
         metavar="PORT",
         help="Loopback port for the Built-in MCP runtime.",
     ),
+    ResponsesCliFlagSpec(
+        field_name="codex_approval_model",
+        supervisor_flag="--codex-approval-model",
+        supervisor_dest="codex_approval_model",
+        integrated_flag="--responses-codex-approval-model",
+        metavar="MODEL",
+        help=(
+            "Upstream model to use for Codex CLI auto-approval guardian reviews. "
+            "When set, requests with model 'codex-auto-review' are rewritten to this model."
+        ),
+    ),
 )
 
 
@@ -150,6 +178,7 @@ class ResponsesCliArgs(BaseModel):
 
     upstream_api_kind: UpstreamAPIKind | None = None
     web_search_profile: str | None = None
+    reasoning_event_format: ReasoningEventFormat | None = None
     code_interpreter_mode: CodeInterpreterMode | None = None
     code_interpreter_port: int | None = None
     code_interpreter_workers: int | None = None
@@ -159,6 +188,7 @@ class ResponsesCliArgs(BaseModel):
     upstream_ready_interval_s: float | None = None
     mcp_config_path: str | None = None
     mcp_port: int | None = None
+    codex_approval_model: str | None = None
 
     @field_validator("upstream_api_kind", mode="before")
     @classmethod
@@ -175,6 +205,16 @@ class ResponsesCliArgs(BaseModel):
     @field_validator("code_interpreter_mode", mode="before")
     @classmethod
     def _normalize_code_interpreter_mode(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized or None
+        return value
+
+    @field_validator("reasoning_event_format", mode="before")
+    @classmethod
+    def _normalize_reasoning_event_format(cls, value: object) -> object:
         if value is None:
             return None
         if isinstance(value, str):
@@ -251,6 +291,7 @@ class ResponsesCliArgs(BaseModel):
 class ResolvedIntegratedResponsesCli:
     filtered_args: list[str]
     upstream_api_kind: UpstreamAPIKind
+    reasoning_event_format: ReasoningEventFormat
     web_search_profile: str | None
     code_interpreter_mode: CodeInterpreterMode
     code_interpreter_port: int
@@ -259,6 +300,7 @@ class ResolvedIntegratedResponsesCli:
     code_interpreter_egress_policy_path: str | None
     mcp_config_path: str | None
     mcp_port: int | None
+    codex_approval_model: str | None = None
 
 
 def add_supervisor_responses_cli_arguments(parser: argparse.ArgumentParser) -> None:
@@ -362,6 +404,11 @@ def resolve_integrated_responses_cli(
             else "chat_completions"
         ),
         "web_search_profile": integrated_raw_values["web_search_profile"],
+        "reasoning_event_format": (
+            integrated_raw_values["reasoning_event_format"]
+            if integrated_raw_values["reasoning_event_format"] is not None
+            else RUNTIME_DEFAULTS.reasoning_event_format
+        ),
         "code_interpreter_mode": (
             integrated_raw_values["code_interpreter_mode"]
             if integrated_raw_values["code_interpreter_mode"] is not None
@@ -387,6 +434,7 @@ def resolve_integrated_responses_cli(
         ],
         "mcp_config_path": integrated_raw_values["mcp_config_path"],
         "mcp_port": integrated_raw_values["mcp_port"],
+        "codex_approval_model": integrated_raw_values["codex_approval_model"],
     }
     responses_cli = validate_responses_cli_args(
         raw_values=raw_values,
@@ -409,6 +457,8 @@ def resolve_integrated_responses_cli(
     return ResolvedIntegratedResponsesCli(
         filtered_args=filtered_args,
         upstream_api_kind=responses_cli.upstream_api_kind or "chat_completions",
+        reasoning_event_format=responses_cli.reasoning_event_format
+        or RUNTIME_DEFAULTS.reasoning_event_format,
         web_search_profile=responses_cli.web_search_profile,
         code_interpreter_mode=code_interpreter_mode,
         code_interpreter_port=int(code_interpreter_port),
@@ -417,6 +467,7 @@ def resolve_integrated_responses_cli(
         code_interpreter_egress_policy_path=responses_cli.code_interpreter_egress_policy_path,
         mcp_config_path=responses_cli.mcp_config_path,
         mcp_port=responses_cli.mcp_port,
+        codex_approval_model=responses_cli.codex_approval_model,
     )
 
 
@@ -437,6 +488,11 @@ def _format_responses_cli_error(
 
     if field_name == "upstream_api_kind" and error["type"] == "literal_error":
         return f"{error_prefix} error: {label} must be one of {_SUPPORTED_UPSTREAM_API_KINDS}."
+
+    if field_name == "reasoning_event_format" and error["type"] == "literal_error":
+        return (
+            f"{error_prefix} error: {label} must be one of {_SUPPORTED_REASONING_EVENT_FORMATS}."
+        )
 
     if (
         field_name == "mcp_port"

@@ -4,7 +4,7 @@ request:
     include:
       - web_search_call.action.sources
     input: Using the web search tool, open https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/web-search, find the phrase that describes what Deep Research is best for, and answer with that sentence only.
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
     stream: false
     tool_choice: required
@@ -37,7 +37,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-mini-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_05ab0c900d2cc14f0169b137ca19748190a7ca8980f43e0664

@@ -62,6 +62,7 @@ nav:
       - Custom Tools: examples/tool-loop-examples.md
       - MCP Examples: examples/hosted-mcp-examples.md
       - Conversations: examples/stateful-conversations.md
+      - Codex CLI: examples/codex-cli.md
 
 markdown_extensions:
   - admonition

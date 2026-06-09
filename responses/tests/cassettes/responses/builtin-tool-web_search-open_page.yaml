@@ -2,7 +2,7 @@ filename: 2026-03-11-019cdc19-af95-7a31-be55-91d4ec28aeb8
 request:
   body:
     input: Using the web search tool, open https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/web-search and tell me the three web search modes listed on that page.
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
     stream: false
     tool_choice: required
@@ -35,7 +35,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-mini-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0215f4b1038da1290169b12d7e4fa08193b6b7c1195054ced9

@@ -7,6 +7,7 @@ from vllm_responses.configs.defaults import RUNTIME_DEFAULTS
 from vllm_responses.configs.runtime import (
     INTEGRATED_INTERNAL_ROUTE_PREFIX,
     CodeInterpreterMode,
+    ReasoningEventFormat,
     RuntimeConfig,
     RuntimeMode,
     UpstreamAPIKind,
@@ -69,6 +70,13 @@ def resolve_upstream_api_kind(raw: str) -> UpstreamAPIKind:
     raise ValueError(f"invalid upstream api kind: {raw!r}")
 
 
+def resolve_reasoning_event_format(raw: str) -> ReasoningEventFormat:
+    normalized = raw.strip().lower()
+    if normalized in {"openai", "openresponses"}:
+        return normalized
+    raise ValueError(f"invalid reasoning event format: {raw!r}")
+
+
 def derive_integrated_llm_api_base(
     *,
     host: str,
@@ -86,6 +94,7 @@ def build_common_runtime_config(
     env: EnvSource,
     runtime_mode: RuntimeMode,
     upstream_api_kind: UpstreamAPIKind,
+    reasoning_event_format: ReasoningEventFormat = RUNTIME_DEFAULTS.reasoning_event_format,
     gateway_host: str,
     gateway_port: int,
     gateway_workers: int,
@@ -100,6 +109,7 @@ def build_common_runtime_config(
     upstream_ready_interval_s: float = RUNTIME_DEFAULTS.upstream_ready_interval_s,
     mcp_config_path: str | None,
     mcp_builtin_runtime_url: str | None,
+    codex_approval_model: str | None = None,
 ) -> RuntimeConfig:
     try:
         validate_profiled_builtin_profile(
@@ -132,6 +142,7 @@ def build_common_runtime_config(
     return RuntimeConfig(
         runtime_mode=runtime_mode,
         upstream_api_kind=upstream_api_kind,
+        reasoning_event_format=reasoning_event_format,
         gateway_host=gateway_host,
         gateway_port=int(gateway_port),
         gateway_workers=int(gateway_workers),
@@ -215,6 +226,7 @@ def build_common_runtime_config(
             "VR_RESPONSE_STORE_CACHE_TTL_SECONDS",
             RUNTIME_DEFAULTS.response_store_cache_ttl_seconds,
         ),
+        codex_approval_model=codex_approval_model,
     )
 
 
@@ -226,6 +238,9 @@ def build_runtime_config_for_standalone(
     env = EnvSource.from_env() if env is None else env
     upstream_api_kind = resolve_upstream_api_kind(
         env.get_str("VR_UPSTREAM_API_KIND", "chat_completions")
+    )
+    reasoning_event_format = resolve_reasoning_event_format(
+        env.get_str("VR_REASONING_EVENT_FORMAT", RUNTIME_DEFAULTS.reasoning_event_format)
     )
     code_interpreter_mode = resolve_code_interpreter_mode(
         env.get_str("VR_CODE_INTERPRETER_MODE", RUNTIME_DEFAULTS.code_interpreter_mode)
@@ -247,6 +262,7 @@ def build_runtime_config_for_standalone(
         env=env,
         runtime_mode=runtime_mode,
         upstream_api_kind=upstream_api_kind,
+        reasoning_event_format=reasoning_event_format,
         gateway_host=env.get_str("VR_HOST", RUNTIME_DEFAULTS.host),
         gateway_port=env.get_int("VR_PORT", RUNTIME_DEFAULTS.port),
         gateway_workers=env.get_int("VR_WORKERS", RUNTIME_DEFAULTS.workers),
@@ -263,6 +279,7 @@ def build_runtime_config_for_standalone(
         ),
         mcp_config_path=env.get_optional_str("VR_MCP_CONFIG_PATH"),
         mcp_builtin_runtime_url=env.get_optional_str("VR_MCP_BUILTIN_RUNTIME_URL"),
+        codex_approval_model=env.get_optional_str("VR_CODEX_APPROVAL_MODEL"),
     )
 
 
@@ -331,6 +348,11 @@ def build_runtime_config_for_supervisor(
             if responses_cli.upstream_api_kind is None
             else responses_cli.upstream_api_kind
         ),
+        reasoning_event_format=(
+            RUNTIME_DEFAULTS.reasoning_event_format
+            if responses_cli.reasoning_event_format is None
+            else responses_cli.reasoning_event_format
+        ),
         gateway_host=(
             RUNTIME_DEFAULTS.host if gateway_host_arg is None else str(gateway_host_arg)
         ),
@@ -363,6 +385,7 @@ def build_runtime_config_for_supervisor(
         ),
         mcp_config_path=responses_cli.mcp_config_path,
         mcp_builtin_runtime_url=mcp_builtin_runtime_url,
+        codex_approval_model=responses_cli.codex_approval_model,
     )
 
 
@@ -372,6 +395,7 @@ def build_runtime_config_for_integrated(
     host: str,
     port: int,
     upstream_api_kind: UpstreamAPIKind = "chat_completions",
+    reasoning_event_format: ReasoningEventFormat = RUNTIME_DEFAULTS.reasoning_event_format,
     web_search_profile: str | None,
     code_interpreter_mode: CodeInterpreterMode,
     code_interpreter_port: int,
@@ -380,6 +404,7 @@ def build_runtime_config_for_integrated(
     code_interpreter_egress_policy_path: str | None = None,
     mcp_config_path: str | None,
     mcp_builtin_runtime_url: str | None,
+    codex_approval_model: str | None = None,
 ) -> RuntimeConfig:
     env = EnvSource.from_env() if env is None else env
     effective_code_interpreter_port = None
@@ -392,6 +417,7 @@ def build_runtime_config_for_integrated(
         env=env,
         runtime_mode="integrated",
         upstream_api_kind=upstream_api_kind,
+        reasoning_event_format=reasoning_event_format,
         gateway_host=host,
         gateway_port=port,
         gateway_workers=1,
@@ -408,6 +434,7 @@ def build_runtime_config_for_integrated(
         code_interpreter_egress_policy_path=code_interpreter_egress_policy_path,
         mcp_config_path=mcp_config_path,
         mcp_builtin_runtime_url=mcp_builtin_runtime_url,
+        codex_approval_model=codex_approval_model,
     )
 
 

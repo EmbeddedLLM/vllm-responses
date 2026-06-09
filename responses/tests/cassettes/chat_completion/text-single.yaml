@@ -4,7 +4,7 @@ request:
     messages:
       - content: What is the capital of France?
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
   headers:
     accept: application/json
@@ -30,7 +30,7 @@ response:
           role: assistant
     created: 1767868992
     id: chatcmpl-CvhlwgPRBt3uXp8XYvLwvQlv86R22
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: chat.completion
     service_tier: default
     system_fingerprint: null

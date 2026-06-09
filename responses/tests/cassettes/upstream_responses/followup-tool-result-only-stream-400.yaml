@@ -11,7 +11,7 @@ request:
       - call_id: chatcmpl-tool-880f41c6876eb36f
         output: The weather in Boston is sunny, 72F.
         type: function_call_output
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     store: false
     stream: true
   headers:
@@ -21,7 +21,7 @@ request:
     content-length: "367"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: qwen35a3b-responses-followup-tool-result-only-stream-400.yaml
+    x-run-id: followup-tool-result-only-stream-400.yaml
   method: POST
   path: /v1/responses
   query_params: {}

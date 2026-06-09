@@ -41,6 +41,8 @@ def test_vllm_cli_runs_integrated_serve_when_responses_flag_present(
                 "model",
                 "--responses",
                 "--responses-code-interpreter=disabled",
+                "--responses-reasoning-event-format",
+                "openresponses",
             ]
         )
 
@@ -48,6 +50,7 @@ def test_vllm_cli_runs_integrated_serve_when_responses_flag_present(
     spec = seen["spec"]
     assert spec.vllm_args == ["serve", "model"]
     assert spec.code_interpreter_mode == "disabled"
+    assert spec.reasoning_event_format == "openresponses"
 
 
 def test_vllm_cli_bootstraps_builtin_registries_before_integrated_spec_parse(
@@ -97,4 +100,6 @@ def test_vllm_cli_prints_integrated_help_for_responses_help(
         vllm_cli.main(["serve", "model", "--responses", "--help"])
 
     assert excinfo.value.code == 0
-    assert "--responses-code-interpreter" in capsys.readouterr().out
+    help_text = capsys.readouterr().out
+    assert "--responses-code-interpreter" in help_text
+    assert "--responses-reasoning-event-format" in help_text

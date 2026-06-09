@@ -1,60 +1,52 @@
-filename: 2026-03-30-019d3cca-d4f0-7d91-b86f-a4c1c2740f96
+filename: 2026-03-30-019d3e78-3e2f-7d23-aca4-e576ecf2130f
 request:
   body:
     input:
-      - arguments: '{"location":"Paris"}'
-        call_id: call_bae10f033e8eb973
-        id: fc_bae10f033e8eb973
-        name: get_weather
-        status: null
-        type: function_call
-      - call_id: call_bae10f033e8eb973
-        output: '{"temperature_c":21,"conditions":"sunny"}'
-        type: function_call_output
-      - content: Please answer using the function output.
+      - content: hello
         role: user
-        type: message
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
+    store: false
     stream: false
   headers:
     accept: "*/*"
     accept-encoding: gzip, deflate, br
     connection: keep-alive
-    content-length: "426"
+    content-length: "103"
     content-type: application/json
     user-agent: python-httpx/0.28.1
+    x-run-id: oss-text-nonstream.yaml
   method: POST
   path: /v1/responses
   query_params: {}
-request_id: 019d3cca-d4f0-7d91-b86f-a4c1c2740f96
+request_id: 019d3e78-3e2f-7d23-aca4-e576ecf2130f
 response:
   body:
     background: false
-    created_at: 1774841419
-    id: resp_8c0c1a97b0ea9501
+    created_at: 1774869560
+    id: resp_81d5882cb2e96af5
     incomplete_details: null
     input_messages: null
     instructions: null
-    max_output_tokens: 130963
+    max_output_tokens: 131004
     max_tool_calls: null
     metadata: null
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
     object: response
     output:
       - content:
-          - text: 'User says: "Please answer using the function output." The last function call gave weather. They likely want that output. So respond with the function output formatted. Provide JSON or text? The instruction says "using the function output". Use the output provided. So respond with "The temperature in Paris is 21°C, and the conditions are sunny."'
+          - text: The user says "hello". They are greeting. I should respond politely. Probably just a friendly greeting. Since no further instructions, just respond in friendly tone.
             type: reasoning_text
         encrypted_content: null
-        id: rs_aae692fd6dc612dd
+        id: rs_9f773c2f1c4036c7
         status: null
         summary: []
         type: reasoning
       - content:
           - annotations: []
             logprobs: null
-            text: The temperature in Paris is 21 °C, and the conditions are sunny.
+            text: Hello! 👋 How can I help you today?
             type: output_text
-        id: msg_b5c38c3e0c63071d
+        id: msg_9bc9ad519c0f6693
         phase: null
         role: assistant
         status: completed
@@ -74,25 +66,25 @@ response:
     top_p: 1.0
     truncation: disabled
     usage:
-      input_tokens: 109
+      input_tokens: 68
       input_tokens_details:
-        cached_tokens: 96
+        cached_tokens: 64
         cached_tokens_per_turn:
-          - 96
+          - 64
         input_tokens_per_turn:
-          - 109
-      output_tokens: 96
+          - 68
+      output_tokens: 53
       output_tokens_details:
         output_tokens_per_turn:
-          - 96
-        reasoning_tokens: 71
+          - 53
+        reasoning_tokens: 33
         tool_output_tokens: 0
         tool_output_tokens_per_turn:
           - 0
-      total_tokens: 205
+      total_tokens: 121
     user: null
   headers:
-    content-length: "1600"
+    content-length: "1382"
     content-type: application/json
   status_code: 200
-timestamp: "2026-03-30T03:30:18.992633+00:00"
+timestamp: "2026-03-30T11:19:20.879357+00:00"

@@ -41,6 +41,7 @@ def _base_spec(
     mcp_runtime: McpRuntimeSpec | None,
     web_search_profile: str | None = None,
     mcp_config_path: str | None = None,
+    codex_approval_model: str | None = None,
 ) -> ServeSpec:
     runtime_config = build_runtime_config_for_supervisor(
         args=SimpleNamespace(
@@ -54,6 +55,7 @@ def _base_spec(
             code_interpreter_workers=None,
             mcp_config=mcp_config_path if mcp_config_path is not None else None,
             mcp_port=None if mcp_runtime is None else mcp_runtime.port,
+            codex_approval_model=codex_approval_model,
         ),
         env=EnvSource(environ={}),
     )
@@ -192,3 +194,39 @@ def test_run_serve_spec_with_web_search_profile_spawns_builtin_mcp_runtime_witho
     assert gateway_env.get("VR_WEB_SEARCH_PROFILE") == "duckduckgo_plus_fetch"
     assert "VR_MCP_CONFIG_PATH" not in gateway_env
     assert gateway_env.get("VR_MCP_BUILTIN_RUNTIME_URL") == "http://127.0.0.1:5981"
+
+
+def test_run_serve_spec_exports_codex_approval_model_to_gateway_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    popen_calls = _patch_supervisor_runtime_dependencies(monkeypatch)
+    spec = _base_spec(
+        mcp_runtime=None,
+        codex_approval_model="vllm/test-model",
+    )
+
+    code = run_serve_spec(spec)
+
+    assert code == 0
+    gateway_calls = [call for call in popen_calls if call["is_mcp_runtime"] is False]
+    assert len(gateway_calls) == 1
+    gateway_env = gateway_calls[0]["env"]
+    assert gateway_env.get("VR_CODEX_APPROVAL_MODEL") == "vllm/test-model"
+
+
+def test_run_serve_spec_omits_codex_approval_model_when_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    popen_calls = _patch_supervisor_runtime_dependencies(monkeypatch)
+    spec = _base_spec(
+        mcp_runtime=None,
+        codex_approval_model=None,
+    )
+
+    code = run_serve_spec(spec)
+
+    assert code == 0
+    gateway_calls = [call for call in popen_calls if call["is_mcp_runtime"] is False]
+    assert len(gateway_calls) == 1
+    gateway_env = gateway_calls[0]["env"]
+    assert "VR_CODEX_APPROVAL_MODEL" not in gateway_env

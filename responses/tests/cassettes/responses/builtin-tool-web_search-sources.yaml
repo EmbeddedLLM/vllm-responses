@@ -4,7 +4,7 @@ request:
     include:
       - web_search_call.action.sources
     input: Use web search to find the current federal funds target range in the United States. Keep it short.
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
     stream: false
     tool_choice: required
@@ -37,7 +37,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-mini-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0e9d092ff5bd29df0169b137bd6b108197970889253a011ded

@@ -170,7 +170,7 @@ async def test_as_run_settings_admits_web_search_tool_alias(tool_type: str) -> N
         }
     )
 
-    _run_settings, builtin_tools, _mcp_map = await req.as_run_settings(
+    _run_settings, builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -196,7 +196,7 @@ async def test_allowed_tools_filters_builtin_tools() -> None:
         }
     )
 
-    _run_settings, builtin_tools, _mcp_map = await req.as_run_settings(
+    _run_settings, builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -222,7 +222,7 @@ async def test_allowed_tools_required_adds_internal_instruction() -> None:
         }
     )
 
-    run_settings, builtin_tools, _mcp_map = await req.as_run_settings(
+    run_settings, builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -269,7 +269,7 @@ async def test_hosted_tool_choice_adds_internal_instruction(tool_choice_type: st
         }
     )
 
-    run_settings, builtin_tools, _mcp_map = await req.as_run_settings(
+    run_settings, builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -324,7 +324,7 @@ async def test_as_run_settings_replays_completed_web_search_call() -> None:
         }
     )
 
-    run_settings, _builtin_tools, _mcp_map = await req.as_run_settings(
+    run_settings, _builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,

@@ -11,7 +11,7 @@ request:
       - call_id: call_bae10f033e8eb973
         output: '{"temperature_c":21,"conditions":"sunny"}'
         type: function_call_output
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
     store: false
     stream: true
   headers:
@@ -21,7 +21,7 @@ request:
     content-length: "353"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: gptoss20b-responses-followup-function-call-output-stream.yaml
+    x-run-id: oss-followup-function-call-output-stream.yaml
   method: POST
   path: /v1/responses
   query_params: {}
@@ -33,7 +33,7 @@ response:
     - "event: response.created
 
       "
-    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
 
       '
     - "
@@ -42,7 +42,7 @@ response:
     - "event: response.in_progress
 
       "
-    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
 
       '
     - "
@@ -2094,7 +2094,7 @@ response:
     - "event: response.completed
 
       "
-    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[{"id":"rs_8b4252ed11f3dec8","summary":[],"type":"reasoning","content":[{"text":"The user just executed the get_weather function. They likely expect a response showing the result and perhaps additional commentary. According to instruction: \"When the assistant receives a function call from the user, the assistant must respond with the result of the function.\" So we need to respond with the function result. The function returned {\"temperature_c\":21,\"conditions\":\"sunny\"}. We must respond with that JSON only, or we can output the JSON? The instruction: \"When the assistant receives a function call from the user, the assistant must respond with the result of the function.\" So we need to respond exactly with the result: maybe just the JSON. In some examples, they might output a JSON object with the data. I''d output the JSON object. Since we''ve already called get_weather. The answer: show the temperature and conditions. According to guidelines, must show only result. So:\n\n{\n  \"temperature_c\": 21,\n  \"conditions\": \"sunny\"\n}\n\nLet''s provide that.","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_a0ba79dd3678bfab","content":[{"annotations":[],"text":"{\n  \"temperature_c\": 21,\n  \"conditions\": \"sunny\"\n}","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":98,"input_tokens_details":{"cached_tokens":96,"input_tokens_per_turn":[98],"cached_tokens_per_turn":[96]},"output_tokens":227,"output_tokens_details":{"reasoning_tokens":200,"tool_output_tokens":0,"output_tokens_per_turn":[227],"tool_output_tokens_per_turn":[0]},"total_tokens":325},"user":null,"input_messages":null,"output_messages":null},"sequence_number":229,"type":"response.completed"}
+    - 'data: {"response":{"id":"resp_bc4d6d66ab7d8826","created_at":1774869280,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[{"id":"rs_8b4252ed11f3dec8","summary":[],"type":"reasoning","content":[{"text":"The user just executed the get_weather function. They likely expect a response showing the result and perhaps additional commentary. According to instruction: \"When the assistant receives a function call from the user, the assistant must respond with the result of the function.\" So we need to respond with the function result. The function returned {\"temperature_c\":21,\"conditions\":\"sunny\"}. We must respond with that JSON only, or we can output the JSON? The instruction: \"When the assistant receives a function call from the user, the assistant must respond with the result of the function.\" So we need to respond exactly with the result: maybe just the JSON. In some examples, they might output a JSON object with the data. I''d output the JSON object. Since we''ve already called get_weather. The answer: show the temperature and conditions. According to guidelines, must show only result. So:\n\n{\n  \"temperature_c\": 21,\n  \"conditions\": \"sunny\"\n}\n\nLet''s provide that.","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_a0ba79dd3678bfab","content":[{"annotations":[],"text":"{\n  \"temperature_c\": 21,\n  \"conditions\": \"sunny\"\n}","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130974,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":98,"input_tokens_details":{"cached_tokens":96,"input_tokens_per_turn":[98],"cached_tokens_per_turn":[96]},"output_tokens":227,"output_tokens_details":{"reasoning_tokens":200,"tool_output_tokens":0,"output_tokens_per_turn":[227],"tool_output_tokens_per_turn":[0]},"total_tokens":325},"user":null,"input_messages":null,"output_messages":null},"sequence_number":229,"type":"response.completed"}
 
       '
     - "

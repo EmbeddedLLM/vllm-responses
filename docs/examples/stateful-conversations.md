@@ -11,7 +11,7 @@ This example simulates a conversation between a user and an assistant.
 ```python
 # Initial request
 response_1 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[
         {"role": "system", "content": "You are a helpful pirate."},
         {"role": "user", "content": "Hello!"}
@@ -28,7 +28,7 @@ For the next turn, we **do not** send the previous messages. We only send the ne
 
 ```python
 response_2 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response_1.id,
     input=[{"role": "user", "content": "Where is the treasure?"}]
 )
@@ -43,7 +43,7 @@ We continue the chain using `response_2.id`.
 
 ```python
 response_3 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response_2.id,
     input=[{"role": "user", "content": "Can you show me the map?"}]
 )
@@ -59,7 +59,7 @@ You can change the system prompt mid-conversation. The `instructions` parameter 
 ```python
 # Change persona to a ninja
 response_4 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response_3.id,
     input=[{"role": "user", "content": "Wait, be quiet now."}],
     instructions="You are a stealthy ninja."

@@ -40,14 +40,14 @@ async def test_gateway_streams_text_and_reasoning_via_upstream_responses_backend
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-text-stream.yaml"
+        "text-stream.yaml"
     )
 
     async with gateway_client.stream(
         "POST",
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": True,
             "input": [{"role": "user", "content": "hello"}],
         },
@@ -89,13 +89,13 @@ async def test_gateway_non_stream_text_and_reasoning_via_upstream_responses_back
     # LMEngine still drives upstream Responses through streaming collection even when the
     # downstream request is non-streaming.
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-text-stream.yaml"
+        "text-stream.yaml"
     )
 
     resp = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": False,
             "input": [{"role": "user", "content": "hello"}],
         },
@@ -132,7 +132,7 @@ async def test_gateway_streams_function_tool_events_via_harmony_upstream_respons
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "gptoss20b-responses-function-stream-auto.yaml"
+        "oss-function-stream-auto.yaml"
     )
 
     async with gateway_client.stream(
@@ -170,7 +170,7 @@ async def test_gateway_non_stream_function_tool_request_via_harmony_upstream_res
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "gptoss20b-responses-function-stream-auto.yaml"
+        "oss-function-stream-auto.yaml"
     )
 
     resp = await gateway_client.post(
@@ -223,14 +223,14 @@ async def test_gateway_non_harmony_streams_auto_function_tool_events_via_upstrea
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-function-stream-auto.yaml"
+        "function-stream-auto.yaml"
     )
 
     async with gateway_client.stream(
         "POST",
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": True,
             "input": [{"role": "user", "content": "What is the weather in Boston?"}],
             "tools": [_weather_tool(parameter_name="city")],
@@ -261,13 +261,13 @@ async def test_gateway_non_harmony_non_stream_function_tool_request_via_upstream
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-function-stream-required.yaml"
+        "function-stream-required.yaml"
     )
 
     resp = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": False,
             "input": [{"role": "user", "content": "What is the weather in Boston?"}],
             "tools": [_weather_tool(parameter_name="city")],
@@ -292,14 +292,14 @@ async def test_gateway_non_harmony_streams_required_function_tool_events_via_ups
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-function-stream-required.yaml"
+        "function-stream-required.yaml"
     )
 
     async with gateway_client.stream(
         "POST",
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": True,
             "input": [{"role": "user", "content": "What is the weather in Boston?"}],
             "tools": [_weather_tool(parameter_name="city")],
@@ -327,13 +327,13 @@ async def test_gateway_non_harmony_named_function_choice_via_upstream_responses_
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-function-named-choice-stream.yaml"
+        "function-named-choice-stream.yaml"
     )
 
     resp = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": False,
             "input": [{"role": "user", "content": "What is the weather in Boston?"}],
             "tools": [_weather_tool(parameter_name="city")],
@@ -360,13 +360,13 @@ async def test_gateway_retrieve_response_uses_local_store_with_upstream_response
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-text-stream.yaml"
+        "text-stream.yaml"
     )
 
     create_resp = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": False,
             "input": [{"role": "user", "content": "hello"}],
         },
@@ -392,7 +392,7 @@ async def test_gateway_previous_response_id_missing_stays_local_with_upstream_re
     resp = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": False,
             "previous_response_id": "resp_missing",
             "input": [{"role": "user", "content": "hello"}],
@@ -419,8 +419,8 @@ async def test_gateway_previous_response_id_continuation_stays_local_with_upstre
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "gptoss20b-responses-function-stream-auto.yaml",
-        "gptoss20b-responses-followup-function-call-output-stream.yaml",
+        "oss-function-stream-auto.yaml",
+        "oss-followup-function-call-output-stream.yaml",
     )
 
     async with gateway_client.stream(
@@ -496,15 +496,15 @@ async def test_gateway_non_harmony_previous_response_id_continuation_stays_local
 ):
     _use_upstream_responses_backend(gateway_app)
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-function-stream-required.yaml",
-        "qwen35a3b-responses-followup-with-user-message-stream.yaml",
+        "function-stream-required.yaml",
+        "followup-with-user-message-stream.yaml",
     )
 
     async with gateway_client.stream(
         "POST",
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "stream": True,
             "input": [{"role": "user", "content": "What is the weather in Boston?"}],
             "tools": [_weather_tool(parameter_name="city")],
@@ -528,7 +528,7 @@ async def test_gateway_non_harmony_previous_response_id_continuation_stays_local
     step2 = await gateway_client.post(
         "/v1/responses",
         json={
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "vllm/test-model",
             "previous_response_id": response_id,
             "input": [
                 {
@@ -558,7 +558,7 @@ async def test_mock_upstream_non_harmony_replays_tool_result_only_followup_strea
 ):
     previous_replayer = mock_llm.app.state.vllm_responses.cassette_replayer
     mock_llm.app.state.vllm_responses.cassette_replayer = upstream_responses_replayer_factory(
-        "qwen35a3b-responses-followup-tool-result-only-stream-400.yaml"
+        "followup-tool-result-only-stream-400.yaml"
     )
 
     transport = httpx.ASGITransport(app=mock_llm.app)
@@ -566,7 +566,7 @@ async def test_mock_upstream_non_harmony_replays_tool_result_only_followup_strea
         resp = await client.post(
             "/v1/responses",
             json={
-                "model": "Qwen/Qwen3.5-35B-A3B",
+                "model": "vllm/test-model",
                 "stream": True,
                 "input": [
                     {

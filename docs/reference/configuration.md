@@ -187,7 +187,7 @@ vllm-responses serve \
 ### Integrated Mode With Built-in MCP
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-mcp-config /etc/vllm-responses/mcp.json
 ```

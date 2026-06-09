@@ -6,7 +6,7 @@ request:
         role: system
       - content: Compute sqrt of 2.
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
     tools:
       - type: code_interpreter

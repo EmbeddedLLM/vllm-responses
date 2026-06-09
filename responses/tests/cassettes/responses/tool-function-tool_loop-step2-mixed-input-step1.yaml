@@ -4,7 +4,7 @@ request:
     input:
       - content: Call get_weather for location=Boston, MA.
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     store: true
     tool_choice:
       name: get_weather
@@ -49,7 +49,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_01cfe077e507d4f2006977901ec3e8819a8db5d7d02476b130

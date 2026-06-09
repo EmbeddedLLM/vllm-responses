@@ -7,6 +7,7 @@ ItemKind = Literal[
     "message",
     "reasoning",
     "function_call",
+    "custom_tool_call",
     "code_interpreter_call",
     "mcp_call",
     "web_search_call",
@@ -53,6 +54,7 @@ class FunctionCallStarted:
     call_id: str
     name: str
     initial_arguments_json: str
+    namespace: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,19 @@ class FunctionCallArgumentsDelta:
 class FunctionCallDone:
     item_key: str
     arguments_json: str
+
+
+@dataclass(frozen=True, slots=True)
+class CustomToolCallStarted:
+    item_key: str
+    call_id: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class CustomToolCallDone:
+    item_key: str
+    input: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +188,8 @@ NormalizedEvent = (
     | FunctionCallStarted
     | FunctionCallArgumentsDelta
     | FunctionCallDone
+    | CustomToolCallStarted
+    | CustomToolCallDone
     | CodeInterpreterCallStarted
     | CodeInterpreterCallCodeDelta
     | CodeInterpreterCallCodeDone

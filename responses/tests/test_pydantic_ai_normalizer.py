@@ -6,6 +6,7 @@ from pydantic_ai import (
     PartDeltaEvent,
     PartEndEvent,
     PartStartEvent,
+    TextPart,
     ThinkingPart,
     ThinkingPartDelta,
     ToolCallPart,
@@ -17,8 +18,11 @@ from vllm_responses.responses_core.models import (
     CodeInterpreterCallCodeDelta,
     CodeInterpreterCallCodeDone,
     CodeInterpreterCallStarted,
+    CustomToolCallDone,
+    CustomToolCallStarted,
     FunctionCallArgumentsDelta,
     FunctionCallDone,
+    FunctionCallStarted,
     ReasoningDelta,
     ReasoningDone,
     ReasoningStarted,
@@ -134,6 +138,166 @@ def test_web_search_normalizer_emits_web_search_events_without_function_arg_even
     assert completed[0].sources == ({"type": "url", "url": "https://example.com/a"},)
     assert not any(isinstance(event, FunctionCallArgumentsDelta) for event in out)
     assert not any(isinstance(event, FunctionCallDone) for event in out)
+
+
+from vllm_responses.types.openai import CodexCompatContext
+
+
+def test_normalizer_splits_codex_namespace_function_call_name():
+    normalizer = PydanticAINormalizer(
+        builtin_tool_names=set(),
+        code_interpreter_tool_name="code_interpreter",
+        codex_compat=CodexCompatContext(
+            namespace_tool_map={"mcp__demo__lookup_order": ("mcp__demo__", "lookup_order")},
+            custom_tool_names=set(),
+        ),
+    )
+
+    events = [
+        PartStartEvent(
+            index=0,
+            part=ToolCallPart(
+                tool_name="mcp__demo__lookup_order",
+                args=None,
+                tool_call_id="call_1",
+            ),
+        ),
+        PartEndEvent(
+            index=0,
+            part=ToolCallPart(
+                tool_name="mcp__demo__lookup_order",
+                args='{"order_id":"1"}',
+                tool_call_id="call_1",
+            ),
+        ),
+    ]
+
+    out = []
+    for event in events:
+        out.extend(list(normalizer.on_event(event)))
+
+    started = [event for event in out if isinstance(event, FunctionCallStarted)]
+    assert len(started) == 1
+    assert started[0].name == "lookup_order"
+    assert started[0].namespace == "mcp__demo__"
+
+    done = [event for event in out if isinstance(event, FunctionCallDone)]
+    assert len(done) == 1
+    assert done[0].arguments_json == '{"order_id":"1"}'
+
+
+def test_normalizer_maps_codex_custom_function_bridge_to_custom_tool_call():
+    normalizer = PydanticAINormalizer(
+        builtin_tool_names=set(),
+        code_interpreter_tool_name="code_interpreter",
+        codex_compat=CodexCompatContext(
+            namespace_tool_map={},
+            custom_tool_names={"apply_patch"},
+        ),
+    )
+
+    events = [
+        PartStartEvent(
+            index=0,
+            part=ToolCallPart(
+                tool_name="apply_patch",
+                args=None,
+                tool_call_id="call_1",
+            ),
+        ),
+        PartEndEvent(
+            index=0,
+            part=ToolCallPart(
+                tool_name="apply_patch",
+                args='{"input":"*** Begin Patch\\n*** End Patch\\n"}',
+                tool_call_id="call_1",
+            ),
+        ),
+    ]
+
+    out = []
+    for event in events:
+        out.extend(list(normalizer.on_event(event)))
+
+    started = [event for event in out if isinstance(event, CustomToolCallStarted)]
+    assert len(started) == 1
+    assert started[0].name == "apply_patch"
+    assert started[0].call_id == "call_1"
+
+    done = [event for event in out if isinstance(event, CustomToolCallDone)]
+    assert len(done) == 1
+    assert done[0].input == "*** Begin Patch\n*** End Patch\n"
+    assert not any(isinstance(event, FunctionCallStarted) for event in out)
+    assert not any(isinstance(event, FunctionCallDone) for event in out)
+
+
+def test_text_tool_call_recovery_splits_codex_namespace_function_call_name():
+    normalizer = PydanticAINormalizer(
+        builtin_tool_names=set(),
+        code_interpreter_tool_name="code_interpreter",
+        text_tool_call_probe_names={"mcp__demo__lookup_order"},
+        codex_compat=CodexCompatContext(
+            namespace_tool_map={"mcp__demo__lookup_order": ("mcp__demo__", "lookup_order")},
+            custom_tool_names=set(),
+        ),
+    )
+
+    events = [
+        PartStartEvent(index=0, part=TextPart(content="")),
+        PartEndEvent(
+            index=0,
+            part=TextPart(
+                content='{"name":"mcp__demo__lookup_order","parameters":{"order_id":"1"}}'
+            ),
+        ),
+    ]
+
+    out = []
+    for event in events:
+        out.extend(list(normalizer.on_event(event)))
+
+    started = [event for event in out if isinstance(event, FunctionCallStarted)]
+    assert len(started) == 1
+    assert started[0].name == "lookup_order"
+    assert started[0].namespace == "mcp__demo__"
+
+    done = [event for event in out if isinstance(event, FunctionCallDone)]
+    assert len(done) == 1
+    assert done[0].arguments_json == '{"order_id":"1"}'
+
+
+def test_text_tool_call_recovery_maps_codex_custom_function_bridge():
+    normalizer = PydanticAINormalizer(
+        builtin_tool_names=set(),
+        code_interpreter_tool_name="code_interpreter",
+        text_tool_call_probe_names={"apply_patch"},
+        codex_compat=CodexCompatContext(
+            namespace_tool_map={},
+            custom_tool_names={"apply_patch"},
+        ),
+    )
+
+    events = [
+        PartStartEvent(index=0, part=TextPart(content="")),
+        PartEndEvent(
+            index=0,
+            part=TextPart(
+                content='{"name":"apply_patch","parameters":{"input":"*** Begin Patch\\n*** End Patch\\n"}}'
+            ),
+        ),
+    ]
+
+    out = []
+    for event in events:
+        out.extend(list(normalizer.on_event(event)))
+
+    started = [event for event in out if isinstance(event, CustomToolCallStarted)]
+    assert len(started) == 1
+    assert started[0].name == "apply_patch"
+
+    done = [event for event in out if isinstance(event, CustomToolCallDone)]
+    assert len(done) == 1
+    assert done[0].input == "*** Begin Patch\n*** End Patch\n"
 
 
 def test_reasoning_normalizer_prefers_raw_reasoning_content_from_provider_details():

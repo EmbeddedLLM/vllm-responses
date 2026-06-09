@@ -4,7 +4,7 @@ request:
     messages:
       - content: What is the capital of France?
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: true
   headers:
     accept: application/json
@@ -23,25 +23,25 @@ response:
     connection: keep-alive
     content-type: text/event-stream; charset=utf-8
   sse:
-    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"gpt-5-nano-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}],"obfuscation":"6X"}
+    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}],"obfuscation":"6X"}
 
       '
     - "
 
       "
-    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"gpt-5-nano-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Paris"},"finish_reason":null}],"obfuscation":"zNFEWcytBlo5BJL"}
+    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Paris"},"finish_reason":null}],"obfuscation":"zNFEWcytBlo5BJL"}
 
       '
     - "
 
       "
-    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"gpt-5-nano-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"."},"finish_reason":null}],"obfuscation":"G1c"}
+    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"."},"finish_reason":null}],"obfuscation":"G1c"}
 
       '
     - "
 
       "
-    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"gpt-5-nano-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"obfuscation":"GwiHosAz9LQ3pa"}
+    - 'data: {"id":"chatcmpl-CvhlyN2l5853AjXol1F74ckCWmuHv","object":"chat.completion.chunk","created":1767868994,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"obfuscation":"GwiHosAz9LQ3pa"}
 
       '
     - "

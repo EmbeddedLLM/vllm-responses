@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3cc9-d93e-7230-8fc8-3dc5839d71a8
 request:
   body:
     input: "Say exactly: hello"
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     store: false
     stream: false
   headers:
@@ -12,7 +12,7 @@ request:
     content-length: "90"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: qwen35a3b-responses-text-nonstream.yaml
+    x-run-id: text-nonstream.yaml
   method: POST
   path: /v1/responses
   query_params: {}
@@ -28,7 +28,7 @@ response:
     max_output_tokens: 262130
     max_tool_calls: null
     metadata: null
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     object: response
     output:
       - content:

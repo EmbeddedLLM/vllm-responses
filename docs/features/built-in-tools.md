@@ -34,7 +34,7 @@ To use the code interpreter, you must:
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Calculate the 10th Fibonacci number."}],
     tools=[{"type": "code_interpreter"}],
     include=["code_interpreter_call.outputs"]

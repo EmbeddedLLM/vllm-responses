@@ -4,12 +4,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import time
 
+from vllm_responses.configs.runtime import ReasoningEventFormat
 from vllm_responses.responses_core.models import (
     CodeInterpreterCallCodeDelta,
     CodeInterpreterCallCodeDone,
     CodeInterpreterCallCompleted,
     CodeInterpreterCallInterpreting,
     CodeInterpreterCallStarted,
+    CustomToolCallDone,
+    CustomToolCallStarted,
     FunctionCallArgumentsDelta,
     FunctionCallDone,
     FunctionCallStarted,
@@ -33,6 +36,7 @@ from vllm_responses.responses_core.models import (
 from vllm_responses.types.openai import (
     OpenAICodeOutputLog,
     OpenAICodeToolCall,
+    OpenAICustomToolCall,
     OpenAIFunctionToolCall,
     OpenAIInputTokenDetails,
     OpenAIMcpToolCall,
@@ -66,8 +70,12 @@ class _ItemState:
     text: str = ""
     reasoning: str = ""
     function_name: str | None = None
+    function_namespace: str | None = None
     function_call_id: str | None = None
     function_args_json: str = ""
+    custom_tool_name: str | None = None
+    custom_tool_call_id: str | None = None
+    custom_tool_input: str = ""
     code: str | None = None
     code_stdout: str | None = None
     code_stderr: str | None = None
@@ -95,7 +103,11 @@ class ResponseComposer:
     """
 
     def __init__(
-        self, *, response: OpenAIResponsesResponse, include: set[str] | None = None
+        self,
+        *,
+        response: OpenAIResponsesResponse,
+        include: set[str] | None = None,
+        reasoning_event_format: ReasoningEventFormat = "openai",
     ) -> None:
         self._response = response
         self._started = False
@@ -105,6 +117,8 @@ class ResponseComposer:
         self._output_items: list[vLLMOutput] = []
         self._reasoning_item: OpenAIReasoningItem | None = None
         self._reasoning_state: _ItemState | None = None
+        self._reasoning_item_done_emitted = False
+        self._reasoning_event_format = reasoning_event_format
         include_set = include or set()
         self._include_code_interpreter_outputs = "code_interpreter_call.outputs" in include_set
         self._include_web_search_action_sources = "web_search_call.action.sources" in include_set
@@ -142,6 +156,10 @@ class ResponseComposer:
             yield from self._function_args_delta(event)
         elif isinstance(event, FunctionCallDone):
             yield from self._function_done(event)
+        elif isinstance(event, CustomToolCallStarted):
+            yield from self._start_custom_tool_call(event)
+        elif isinstance(event, CustomToolCallDone):
+            yield from self._custom_tool_done(event)
         elif isinstance(event, McpCallStarted):
             yield from self._start_mcp_call(event)
         elif isinstance(event, McpCallArgumentsDelta):
@@ -303,20 +321,13 @@ class ResponseComposer:
                 output_index=out_index,
                 item=self._reasoning_item,
             ),
-            # OpenAI emits `output_item.done` for reasoning early (and streams reasoning deltas separately).
-            OpenAIResponsesStreamOutput(
-                type="response.output_item.done",
-                sequence_number=self._incr_seq(),
-                output_index=out_index,
-                item=self._reasoning_item,
-            ),
         ]
 
     def _reasoning_delta(self, event: ReasoningDelta) -> Iterable:
         state = self._items[event.item_key]
         state.reasoning += event.delta
         yield OpenAIResponsesStreamText(
-            type="response.reasoning.delta",
+            type=self._reasoning_delta_event_type(),
             item_id=state.item_id,
             sequence_number=self._incr_seq(),
             output_index=state.output_index,
@@ -328,7 +339,7 @@ class ResponseComposer:
         state = self._items[event.item_key]
         state.reasoning = event.text
         yield OpenAIResponsesStreamText(
-            type="response.reasoning.done",
+            type=self._reasoning_done_event_type(),
             item_id=state.item_id,
             sequence_number=self._incr_seq(),
             output_index=state.output_index,
@@ -337,12 +348,33 @@ class ResponseComposer:
         )
         # Keep `summary` empty for vLLM raw reasoning; `summary_text` is meant to be an actual summary.
         # Preserve raw reasoning in `content` as `reasoning_text`.
+        reasoning_item = None
         for item in self._output_items:
             if isinstance(item, OpenAIReasoningItem) and item.id == state.item_id:
+                reasoning_item = item
                 item.summary = []
                 if event.text:
                     item.content.append(OpenAIReasoningContent(text=event.text))
                 break
+
+        if reasoning_item is not None and not self._reasoning_item_done_emitted:
+            self._reasoning_item_done_emitted = True
+            yield OpenAIResponsesStreamOutput(
+                type="response.output_item.done",
+                sequence_number=self._incr_seq(),
+                output_index=state.output_index,
+                item=reasoning_item,
+            )
+
+    def _reasoning_delta_event_type(self) -> str:
+        if self._reasoning_event_format == "openresponses":
+            return "response.reasoning.delta"
+        return "response.reasoning_text.delta"
+
+    def _reasoning_done_event_type(self) -> str:
+        if self._reasoning_event_format == "openresponses":
+            return "response.reasoning.done"
+        return "response.reasoning_text.done"
 
     def _start_function_call(self, event: FunctionCallStarted) -> Iterable:
         item_id = uuid7_str("fc_")
@@ -352,6 +384,7 @@ class ResponseComposer:
             output_index=out_index,
             kind="function_call",
             function_name=event.name,
+            function_namespace=event.namespace,
             function_call_id=event.call_id,
             function_args_json=event.initial_arguments_json,
         )
@@ -365,6 +398,7 @@ class ResponseComposer:
                 arguments=event.initial_arguments_json,
                 call_id=event.call_id,
                 name=event.name,
+                namespace=event.namespace,
                 id=item_id,
                 status="in_progress",
             ),
@@ -395,6 +429,50 @@ class ResponseComposer:
             arguments=event.arguments_json,
             call_id=state.function_call_id or "",
             name=state.function_name or "",
+            namespace=state.function_namespace,
+            id=state.item_id,
+            status="completed",
+        )
+        yield OpenAIResponsesStreamOutput(
+            type="response.output_item.done",
+            sequence_number=self._incr_seq(),
+            output_index=state.output_index,
+            item=item,
+        )
+        self._output_items.append(item)
+
+    def _start_custom_tool_call(self, event: CustomToolCallStarted) -> Iterable:
+        item_id = uuid7_str("ctc_")
+        out_index = self._alloc_output_index()
+        state = _ItemState(
+            item_id=item_id,
+            output_index=out_index,
+            kind="custom_tool_call",
+            custom_tool_name=event.name,
+            custom_tool_call_id=event.call_id,
+        )
+        self._items[event.item_key] = state
+
+        yield OpenAIResponsesStreamOutput(
+            type="response.output_item.added",
+            sequence_number=self._incr_seq(),
+            output_index=out_index,
+            item=OpenAICustomToolCall(
+                call_id=event.call_id,
+                name=event.name,
+                input="",
+                id=item_id,
+                status="in_progress",
+            ),
+        )
+
+    def _custom_tool_done(self, event: CustomToolCallDone) -> Iterable:
+        state = self._items[event.item_key]
+        state.custom_tool_input = event.input
+        item = OpenAICustomToolCall(
+            call_id=state.custom_tool_call_id or "",
+            name=state.custom_tool_name or "",
+            input=event.input,
             id=state.item_id,
             status="completed",
         )

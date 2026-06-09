@@ -10,7 +10,7 @@ Ensure your client request includes the tool definition and `include` parameter:
 # Common setup for all examples
 client = OpenAI(...)
 kwargs = {
-    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "model": "Qwen/Qwen3.6-35B-A3B",
     "tools": [{"type": "code_interpreter"}],
     "include": ["code_interpreter_call.outputs"]
 }

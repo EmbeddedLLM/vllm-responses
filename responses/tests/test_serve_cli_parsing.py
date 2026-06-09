@@ -18,6 +18,8 @@ def test_serve_parser_accepts_remote_upstream_flags() -> None:
             "responses",
             "--web-search-profile",
             "exa_mcp",
+            "--reasoning-event-format",
+            "openresponses",
             "--code-interpreter-startup-timeout",
             "12.5",
             "--upstream-ready-timeout",
@@ -35,6 +37,7 @@ def test_serve_parser_accepts_remote_upstream_flags() -> None:
     assert ns.upstream == "http://127.0.0.1:8000/v1"
     assert ns.upstream_api_kind == "responses"
     assert ns.web_search_profile == "exa_mcp"
+    assert ns.reasoning_event_format == "openresponses"
     assert ns.code_interpreter_startup_timeout == "12.5"
     assert ns.upstream_ready_timeout == "90"
     assert ns.upstream_ready_interval == "2.5"
@@ -52,5 +55,6 @@ def test_serve_parser_help_lists_web_search_profile_choices(
     assert excinfo.value.code == 0
     help_text = capsys.readouterr().out
     assert "--web-search-profile" in help_text
+    assert "--reasoning-event-format" in help_text
     assert "Choices:" in help_text
     assert "duckduckgo_plus_fetch, exa_mcp." in help_text

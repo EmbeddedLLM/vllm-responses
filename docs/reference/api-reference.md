@@ -52,7 +52,7 @@ The request body should be a JSON object with the following parameters:
 
 | Parameter                | Type                 | Required | Description                                                                                                                        |
 | ------------------------ | -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **model**                | `string`             | Yes      | The ID of the model to use (e.g., `meta-llama/Llama-3.2-3B-Instruct`).                                                             |
+| **model**                | `string`             | Yes      | The ID of the model to use (e.g., `Qwen/Qwen3.6-35B-A3B`).                                                                         |
 | **input**                | `string` or `array`  | Yes      | The input to the model. Can be a simple string prompt or a list of message objects.                                                |
 | **stream**               | `boolean`            | No       | If `true`, the response is streamed as [Server-Sent Events](../usage/streaming-events.md). Default: `false`.                       |
 | **previous_response_id** | `string`             | No       | The ID of a previous response. Used to continue a conversation without re-sending history.                                         |
@@ -164,7 +164,7 @@ On success, returns a JSON object representing the response.
   "id": "resp_01JM...",
   "object": "response",
   "created_at": 1700000000,
-  "model": "meta-llama/Llama-3.2-3B-Instruct",
+  "model": "Qwen/Qwen3.6-35B-A3B",
   "status": "completed",
   "output": [
     {

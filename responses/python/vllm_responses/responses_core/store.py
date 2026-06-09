@@ -20,9 +20,12 @@ from vllm_responses.types.openai import (
     OpenAIAllowedToolsChoice,
     OpenAIFunctionToolChoice,
     OpenAIHostedToolChoice,
+    OpenAIInputItem,
+    OpenAIInputMessage,
     OpenAIMcpToolChoice,
     OpenAIResponsesMcpTool,
     OpenAIResponsesResponse,
+    OpenAITextContent,
     OpenAIToolChoice,
     vLLMInput,
     vLLMResponsesRequest,
@@ -83,6 +86,63 @@ def _normalize_input(value: str | list[vLLMInput]) -> list[vLLMInput]:
     return value
 
 
+def _instruction_text_from_message(
+    item: OpenAIInputMessage | OpenAIInputItem,
+) -> str:
+    content = item.content
+    if isinstance(content, str):
+        return content
+
+    text_parts: list[str] = []
+    for part in content:
+        if not isinstance(part, OpenAITextContent):
+            raise BadInputError(
+                f"{item.role.capitalize()} message content must be text-only when used as instructions."
+            )
+        text_parts.append(part.text)
+    return "\n".join(text_parts)
+
+
+def _join_instruction_parts(parts: list[str]) -> str | None:
+    merged = "\n\n".join(part.rstrip() for part in parts if part)
+    return merged or None
+
+
+def _strip_request_instruction_messages(
+    input_items: list[vLLMInput],
+) -> tuple[list[vLLMInput], str | None]:
+    """Remove request-local instruction messages from replayable history.
+
+    `system` contributes to persistent conversation policy; `developer` (Codex-compatible) is a
+    request-local overlay and is intentionally not persisted.
+    """
+    replayable_input: list[vLLMInput] = []
+    system_parts: list[str] = []
+    for item in input_items:
+        if isinstance(item, (OpenAIInputMessage, OpenAIInputItem)):
+            if item.role == "system":
+                system_parts.append(_instruction_text_from_message(item))
+                continue
+            if item.role == "developer":
+                continue
+        replayable_input.append(item)
+    return replayable_input, _join_instruction_parts(system_parts)
+
+
+def _extract_current_system_instruction(
+    input_items: list[vLLMInput],
+) -> tuple[list[vLLMInput], str | None]:
+    """Remove current-turn system messages while leaving developer overlays for this run."""
+    input_without_system: list[vLLMInput] = []
+    system_parts: list[str] = []
+    for item in input_items:
+        if isinstance(item, (OpenAIInputMessage, OpenAIInputItem)) and item.role == "system":
+            system_parts.append(_instruction_text_from_message(item))
+            continue
+        input_without_system.append(item)
+    return input_without_system, _join_instruction_parts(system_parts)
+
+
 def _sanitize_effective_tools_for_storage(
     tools: list[vLLMResponsesTool] | None,
 ) -> list[vLLMResponsesTool] | None:
@@ -106,6 +166,7 @@ class StoredResponsePayload(BaseModel):
     effective_tools: list[vLLMResponsesTool] | None = None
     effective_tool_choice: OpenAIToolChoice
     effective_instructions: str | None = None
+    effective_system_instruction: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -357,13 +418,19 @@ class DBResponseStore:
 
         await self.ensure_schema()
 
-        hydrated_input = _normalize_input(hydrated_request.input)
+        hydrated_input, system_instruction_from_input = _strip_request_instruction_messages(
+            _normalize_input(hydrated_request.input)
+        )
+        effective_system_instruction = (
+            hydrated_request._effective_system_instruction or system_instruction_from_input
+        )
         payload = StoredResponsePayload(
             hydrated_input=hydrated_input,
             response=response,
             effective_tools=_sanitize_effective_tools_for_storage(hydrated_request.tools),
             effective_tool_choice=hydrated_request.tool_choice,
             effective_instructions=hydrated_request.instructions,
+            effective_system_instruction=effective_system_instruction,
         )
         state_obj = payload.model_dump(mode="json", exclude_none=True)
         state_value: Any = state_obj if self._use_native_json else json_dumps(state_obj)
@@ -430,8 +497,18 @@ class DBResponseStore:
 
         payload = stored.payload()
 
-        new_input = _normalize_input(request.input)
-        hydrated_input = [*payload.hydrated_input, *payload.response.output, *new_input]
+        prior_input, system_instruction_from_prior_input = _strip_request_instruction_messages(
+            payload.hydrated_input
+        )
+        new_input, system_instruction_from_new_input = _extract_current_system_instruction(
+            _normalize_input(request.input)
+        )
+        effective_system_instruction = (
+            system_instruction_from_new_input
+            or payload.effective_system_instruction
+            or system_instruction_from_prior_input
+        )
+        hydrated_input = [*prior_input, *payload.response.output, *new_input]
 
         # Determine effective tools / tool_choice.
         # Use `model_fields_set` to distinguish "omitted" from "explicitly provided".
@@ -480,6 +557,7 @@ class DBResponseStore:
                 "input": hydrated_input,
                 "tools": effective_tools_validated,
                 "tool_choice": effective_tool_choice_validated,
+                "_effective_system_instruction": effective_system_instruction,
             }
         )
 

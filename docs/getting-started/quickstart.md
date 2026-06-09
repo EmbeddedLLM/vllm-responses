@@ -15,7 +15,11 @@ ______________________________________________________________________
     Start vLLM and the Responses gateway together on one public API server:
 
     ```bash
-    vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
+    vllm serve Qwen/Qwen3.6-35B-A3B \
+    --responses \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3
     ```
 
 === "Remote-Upstream Gateway Mode"
@@ -48,7 +52,7 @@ vLLM bind address (default `http://127.0.0.1:8000`).
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer dummy" \
       -d '{
-        "model": "meta-llama/Llama-3.2-3B-Instruct",
+        "model": "Qwen/Qwen3.6-35B-A3B",
         "input": [{"role": "user", "content": "Calculate the factorial of 5"}],
         "stream": true,
         "tools": [{"type": "code_interpreter"}],
@@ -63,7 +67,7 @@ vLLM bind address (default `http://127.0.0.1:8000`).
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer dummy" \
       -d '{
-        "model": "meta-llama/Llama-3.2-3B-Instruct",
+        "model": "Qwen/Qwen3.6-35B-A3B",
         "input": [{"role": "user", "content": "Calculate the factorial of 5"}],
         "tools": [{"type": "code_interpreter"}],
         "include": ["code_interpreter_call.outputs"]
@@ -82,7 +86,7 @@ vLLM bind address (default `http://127.0.0.1:8000`).
     #   http://127.0.0.1:5969/v1
 
     with client.responses.stream(
-        model="meta-llama/Llama-3.2-3B-Instruct",
+        model="Qwen/Qwen3.6-35B-A3B",
         input=[{"role": "user", "content": "Calculate the factorial of 5"}],
         tools=[{"type": "code_interpreter"}],
         include=["code_interpreter_call.outputs"],
@@ -132,7 +136,7 @@ curl -X POST http://127.0.0.1:5969/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dummy" \
   -d '{
-    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "model": "Qwen/Qwen3.6-35B-A3B",
     "stream": true,
     "input": [{"role":"user","content":"Use the MCP docs tool to search for migration notes."}],
     "tools": [{"type":"mcp","server_label":"github_docs"}],

@@ -156,15 +156,14 @@ Prereq:
 Example:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3.5-0.8B \
+CUDA_VISIBLE_DEVICES=0 vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
-  --reasoning-parser qwen3 \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
   --host 0.0.0.0 \
   --port 8457
 ```
-
 CLI help:
 
 - `vllm serve --help` shows upstream vLLM help
@@ -191,7 +190,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:5969/v1", api_key="dummy")
 
 with client.responses.stream(
-    model="MiniMaxAI/MiniMax-M2.1",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "You MUST call the code_interpreter tool. Execute: 2+2. Reply with ONLY the number."}],
     tools=[{"type": "code_interpreter"}],
     tool_choice="auto",
@@ -204,7 +203,7 @@ with client.responses.stream(
     r1 = stream.get_final_response().id
 
 with client.responses.stream(
-    model="MiniMaxAI/MiniMax-M2.1",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=r1,
     input=[{"role": "user", "content": "What number did you just compute? Reply with ONLY the number."}],
     tool_choice="none",

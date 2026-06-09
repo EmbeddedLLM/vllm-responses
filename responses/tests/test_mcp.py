@@ -1682,7 +1682,7 @@ async def test_mixed_hosted_and_request_remote_declarations_are_supported() -> N
             },
         }
     )
-    run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+    run_settings, builtin_tools, mcp_tool_name_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=_FakeRequestContractRegistry(
             enabled=True,
             servers={"hosted_docs": ["search_docs"]},
@@ -1725,7 +1725,7 @@ async def test_request_remote_server_url_accepts_sse_and_streamable_http_shapes(
             "tool_choice": {"type": "mcp", "server_label": "github_docs", "name": "search_docs"},
         }
     )
-    _run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+    _run_settings, builtin_tools, mcp_tool_name_map, _namespace_map = await req.as_run_settings(
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
     )
@@ -2024,7 +2024,7 @@ async def test_hosted_mcp_toolset_validates_arguments_and_calls_router() -> None
         }
     )
 
-    run_settings, builtin_tools, _ = await req.as_run_settings(
+    run_settings, builtin_tools, _, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=manager,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -2124,7 +2124,7 @@ async def test_hosted_mcp_toolset_uses_mcp_description_and_normalizes_missing_ty
         }
     )
 
-    run_settings, builtin_tools, _ = await req.as_run_settings(
+    run_settings, builtin_tools, _, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=_FakeRegistry(),
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -2178,7 +2178,7 @@ async def test_allowed_tools_mcp_server_wide_entry_remains_monotonic(
         }
     )
 
-    run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+    run_settings, builtin_tools, mcp_tool_name_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=_FakeRequestContractRegistry(
             enabled=True,
             servers={"github_docs": ["search_docs", "get_page"]},
@@ -2278,7 +2278,7 @@ async def test_mcp_rehydration_keeps_colliding_tool_names_distinct() -> None:
         }
     )
 
-    run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+    run_settings, builtin_tools, mcp_tool_name_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=_FakeRegistry(),
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
@@ -2344,7 +2344,7 @@ async def test_mcp_rehydration_keeps_same_name_different_modes_distinct(
         }
     )
 
-    _run_settings, builtin_tools, mcp_tool_name_map = await req.as_run_settings(
+    _run_settings, builtin_tools, mcp_tool_name_map, _namespace_map = await req.as_run_settings(
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,
     )
@@ -2742,7 +2742,7 @@ async def test_max_tool_calls_is_not_mapped_to_runtime_usage_limits() -> None:
             "max_tool_calls": 7,
         }
     )
-    run_settings, _builtin_tools, _mcp_map = await req.as_run_settings(
+    run_settings, _builtin_tools, _mcp_map, _namespace_map = await req.as_run_settings(
         builtin_mcp_runtime_client=None,
         request_remote_enabled=True,
         request_remote_url_checks_enabled=True,

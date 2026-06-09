@@ -193,7 +193,7 @@ The gateway can run in different architectural configurations depending on your 
 Use `vllm serve --responses` when you want the colocated local stack on one public API server.
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
+vllm serve Qwen/Qwen3.6-35B-A3B --responses
 ```
 
 **Components:**
@@ -209,7 +209,7 @@ vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
 Integrated mode example with `web_search`:
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-web-search-profile exa_mcp
 ```
@@ -220,7 +220,7 @@ anonymous default, set `EXA_API_KEY` in the gateway environment before startup.
 Integrated mode example with explicit Built-in MCP config:
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-mcp-config /etc/vllm-responses/mcp.json
 ```

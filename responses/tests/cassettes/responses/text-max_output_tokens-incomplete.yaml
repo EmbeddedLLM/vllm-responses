@@ -5,7 +5,7 @@ request:
       - content: Write exactly 20 short bullet points about database indexing tradeoffs. Each bullet must contain at least 8 words.
         role: user
     max_output_tokens: 24
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
   headers:
     accept: application/json
@@ -36,7 +36,7 @@ response:
     max_output_tokens: 24
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-mini-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_03164b56b25f552401699ac492e53c8197b095621425b03c5b

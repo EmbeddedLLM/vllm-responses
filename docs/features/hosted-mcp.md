@@ -72,7 +72,7 @@ curl -X POST http://127.0.0.1:5969/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dummy" \
   -d '{
-    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "model": "Qwen/Qwen3.6-35B-A3B",
     "stream": true,
     "input": [{"role":"user","content":"Find migration notes in docs."}],
     "tools": [{"type":"mcp","server_label":"github_docs","allowed_tools":["search_docs"],"require_approval":"never"}],
@@ -92,7 +92,7 @@ base URL (default `http://127.0.0.1:8000`).
 #   export VLLM_RESPONSES_BASE_URL=http://127.0.0.1:8000/v1
 
 with client.responses.stream(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Find migration notes in docs."}],
     tools=[
         {

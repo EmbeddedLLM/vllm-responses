@@ -378,6 +378,7 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
             host=host,
             port=port,
             upstream_api_kind=spec.upstream_api_kind,
+            reasoning_event_format=spec.reasoning_event_format,
             web_search_profile=spec.web_search_profile,
             code_interpreter_mode=spec.code_interpreter_mode,
             code_interpreter_port=spec.code_interpreter_port,
@@ -386,6 +387,7 @@ def run_integrated_serve(spec: IntegratedServeSpec) -> int:
             code_interpreter_egress_policy_path=spec.code_interpreter_egress_policy_path,
             mcp_config_path=spec.mcp_config_path,
             mcp_builtin_runtime_url=cli_mcp_runtime_url,
+            codex_approval_model=spec.codex_approval_model,
         )
         mcp_runtime = build_mcp_runtime_spec(
             runtime_config,

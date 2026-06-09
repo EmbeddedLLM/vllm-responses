@@ -2,7 +2,7 @@ filename: 2026-01-02-019b7f62-1b31-7e93-b5aa-cca0b06519e8
 request:
   body:
     input: Where is Paris?
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
   headers:
     accept: application/json

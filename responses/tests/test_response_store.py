@@ -79,6 +79,162 @@ async def test_store_put_and_get_roundtrip_incomplete_terminal(tmp_path: Path):
 
 
 @pytest.mark.anyio
+async def test_store_persists_system_instruction_outside_replayable_input(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    req = vLLMResponsesRequest(
+        model="test-model",
+        input=[
+            {"role": "system", "content": "System A"},
+            {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "Developer A"}],
+            },
+            {"role": "user", "content": "hi"},
+        ],
+        tool_choice="none",
+    )
+    resp = OpenAIResponsesResponse(model="test-model", status="completed", output=[])
+
+    await store.put_completed(request=req, hydrated_request=req, response=resp)
+
+    stored = await store.get(response_id=resp.id)
+    assert stored is not None
+    payload = stored.payload()
+    assert payload.effective_system_instruction == "System A"
+    assert [item.role for item in payload.hydrated_input] == ["user"]
+
+
+@pytest.mark.anyio
+async def test_rehydrate_reuses_prior_system_instruction_without_replaying_system_message(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    step1_req = vLLMResponsesRequest(
+        model="test-model",
+        input=[
+            {"role": "system", "content": "System A"},
+            {"role": "user", "content": "hi"},
+        ],
+        tool_choice="none",
+    )
+    step1_resp = OpenAIResponsesResponse(
+        model="test-model",
+        status="completed",
+        output=[
+            OpenAIOutputItem(
+                role="assistant",
+                status="completed",
+                id="msg_1",
+                content=[OpenAIOutputTextContent(text="hello")],
+            )
+        ],
+    )
+    await store.put_completed(request=step1_req, hydrated_request=step1_req, response=step1_resp)
+
+    step2_req = vLLMResponsesRequest(
+        model="test-model",
+        previous_response_id=step1_resp.id,
+        input=[{"role": "user", "content": "next"}],
+        tool_choice="none",
+    )
+    hydrated = await store.rehydrate_request(request=step2_req)
+
+    assert hydrated._effective_system_instruction == "System A"
+    assert [getattr(item, "role", None) for item in hydrated.input] == [
+        "user",
+        "assistant",
+        "user",
+    ]
+    run_settings, _, _, _namespace_map = await hydrated.as_run_settings(
+        request_remote_enabled=False,
+        request_remote_url_checks_enabled=False,
+    )
+    assert run_settings["instructions"] == "System A"
+
+
+@pytest.mark.anyio
+async def test_rehydrate_new_system_replaces_prior_system_instruction(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    step1_req = vLLMResponsesRequest(
+        model="test-model",
+        input=[
+            {"role": "system", "content": "System A"},
+            {"role": "user", "content": "hi"},
+        ],
+        tool_choice="none",
+    )
+    step1_resp = OpenAIResponsesResponse(model="test-model", status="completed", output=[])
+    await store.put_completed(request=step1_req, hydrated_request=step1_req, response=step1_resp)
+
+    step2_req = vLLMResponsesRequest(
+        model="test-model",
+        previous_response_id=step1_resp.id,
+        input=[
+            {"role": "system", "content": "System B"},
+            {"role": "user", "content": "next"},
+        ],
+        tool_choice="none",
+    )
+    hydrated = await store.rehydrate_request(request=step2_req)
+
+    assert hydrated._effective_system_instruction == "System B"
+    assert all(getattr(item, "role", None) != "system" for item in hydrated.input)
+    run_settings, _, _, _namespace_map = await hydrated.as_run_settings(
+        request_remote_enabled=False,
+        request_remote_url_checks_enabled=False,
+    )
+    assert run_settings["instructions"] == "System B"
+
+
+@pytest.mark.anyio
+async def test_rehydrate_developer_message_is_current_turn_overlay(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    step1_req = vLLMResponsesRequest(
+        model="test-model",
+        input=[
+            {"role": "system", "content": "System A"},
+            {"role": "user", "content": "hi"},
+        ],
+        tool_choice="none",
+    )
+    step1_resp = OpenAIResponsesResponse(model="test-model", status="completed", output=[])
+    await store.put_completed(request=step1_req, hydrated_request=step1_req, response=step1_resp)
+
+    step2_req = vLLMResponsesRequest(
+        model="test-model",
+        previous_response_id=step1_resp.id,
+        input=[
+            {"role": "developer", "content": "Developer B"},
+            {"role": "user", "content": "next"},
+        ],
+        tool_choice="none",
+    )
+    hydrated = await store.rehydrate_request(request=step2_req)
+
+    run_settings, _, _, _namespace_map = await hydrated.as_run_settings(
+        request_remote_enabled=False,
+        request_remote_url_checks_enabled=False,
+    )
+    assert run_settings["instructions"] == "System A\n\nDeveloper B"
+    assert [
+        getattr(part, "content", None)
+        for message in run_settings["message_history"]
+        for part in message.parts
+    ] == [
+        "hi",
+        "next",
+    ]
+
+
+@pytest.mark.anyio
 async def test_store_skips_non_terminal_response_status(tmp_path: Path):
     db_path = tmp_path / "state.db"
     store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
@@ -356,3 +512,125 @@ async def test_hydration_appends_previous_input_and_output(tmp_path: Path):
     # tools omitted in step2 => reuse stored tools
     assert hydrated.tools is not None
     assert hydrated.tools[0].type == "function"
+
+
+@pytest.mark.anyio
+async def test_rehydrate_explicit_empty_tools_does_not_reuse_stored_tools(tmp_path: Path):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    step1_req = vLLMResponsesRequest(
+        model="test-model",
+        input=[{"role": "user", "content": "hi"}],
+        tool_choice="auto",
+        tools=[
+            {
+                "type": "function",
+                "name": "get_weather",
+                "parameters": {"type": "object"},
+                "strict": True,
+            }
+        ],
+    )
+    step1_resp = OpenAIResponsesResponse(
+        model="test-model",
+        status="completed",
+        output=[
+            OpenAIOutputItem(
+                role="assistant",
+                status="completed",
+                id="msg_1",
+                content=[OpenAIOutputTextContent(text="hello")],
+            )
+        ],
+    )
+    await store.put_completed(request=step1_req, hydrated_request=step1_req, response=step1_resp)
+
+    step2_req = vLLMResponsesRequest(
+        model="test-model",
+        previous_response_id=step1_resp.id,
+        input=[
+            {
+                "type": "message",
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": "You are performing a CONTEXT CHECKPOINT COMPACTION.",
+                    }
+                ],
+            }
+        ],
+        tools=[],
+        tool_choice="auto",
+    )
+
+    hydrated = await store.rehydrate_request(request=step2_req)
+
+    assert hydrated.previous_response_id is None
+    assert hydrated.tools == []
+
+
+@pytest.mark.anyio
+async def test_rehydrate_rebuilds_codex_namespace_tool_map_when_tools_are_omitted(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "state.db"
+    store = DBResponseStore.from_db_url(db_url=f"sqlite+aiosqlite:///{db_path}")
+
+    step1_req = vLLMResponsesRequest.model_validate(
+        {
+            "model": "test-model",
+            "input": [{"role": "user", "content": "hi"}],
+            "tool_choice": "auto",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__demo__",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "lookup_order",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    step1_resp = OpenAIResponsesResponse(
+        model="test-model",
+        status="completed",
+        output=[
+            OpenAIOutputItem(
+                role="assistant",
+                status="completed",
+                id="msg_1",
+                content=[OpenAIOutputTextContent(text="hello")],
+            )
+        ],
+    )
+    await store.put_completed(request=step1_req, hydrated_request=step1_req, response=step1_resp)
+
+    step2_req = vLLMResponsesRequest(
+        model="test-model",
+        previous_response_id=step1_resp.id,
+        input=[{"role": "user", "content": "continue"}],
+        tool_choice="auto",
+    )
+
+    hydrated = await store.rehydrate_request(request=step2_req)
+    run_settings, _, _, codex_compat = await hydrated.as_run_settings(
+        builtin_mcp_runtime_client=None,
+        request_remote_enabled=False,
+        request_remote_url_checks_enabled=False,
+    )
+
+    assert hydrated.tools is not None
+    assert hydrated.tools[0].type == "namespace"
+    assert codex_compat.namespace_tool_map == {
+        "mcp__demo__lookup_order": ("mcp__demo__", "lookup_order")
+    }
+    toolsets = run_settings["toolsets"]
+    assert toolsets is not None
+    assert [tool.name for tool in toolsets[0].tool_defs] == ["mcp__demo__lookup_order"]

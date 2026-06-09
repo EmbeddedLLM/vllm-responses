@@ -37,7 +37,7 @@ tools = [
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "What's the weather in Boston?"}],
     tools=tools,
     tool_choice="auto",
@@ -72,7 +72,7 @@ Send the tool output back to the model using `previous_response_id`.
 
 ```python
 final_response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response_id,
     input=[
         {

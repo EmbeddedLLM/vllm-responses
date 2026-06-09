@@ -6,7 +6,7 @@ request:
         role: system
       - content: Compute sqrt of 2.
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
     tools:
       - container:
@@ -38,7 +38,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0bd3613b0ba107fe006957f98f596c8199b52bc7405eba8b2c

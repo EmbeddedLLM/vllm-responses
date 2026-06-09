@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vllm_responses.configs.runtime import CodeInterpreterMode
+from vllm_responses.configs.runtime import CodeInterpreterMode, ReasoningEventFormat
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,6 +16,7 @@ class RuntimeDefaults:
     log_dir: str = "logs"
     log_timings: bool = False
     log_model_messages: bool = False
+    reasoning_event_format: ReasoningEventFormat = "openai"
 
     code_interpreter_mode: CodeInterpreterMode = "spawn"
     code_interpreter_port: int = 5970

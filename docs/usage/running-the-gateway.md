@@ -52,14 +52,14 @@ Use `vllm serve --responses` for the single-command local vLLM + gateway experie
 - Operators who want vLLM and the gateway on one public API server.
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
+vllm serve Qwen/Qwen3.6-35B-A3B --responses
 ```
 
 By default this mode also uses upstream Chat Completions transport. To target integrated native
 Responses transport instead, add:
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-upstream-api-kind responses
 ```

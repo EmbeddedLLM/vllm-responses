@@ -6,7 +6,7 @@ request:
         role: system
       - content: What is US interest rate?
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
     tools:
       - type: web_search
@@ -36,7 +36,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0c77df3a276b37ab006957e6bbb40c8199862bd8edc5a84219

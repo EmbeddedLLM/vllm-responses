@@ -2,7 +2,7 @@ filename: 2026-03-11-019cdc19-e795-7cf0-b32f-7262c93b5c70
 request:
   body:
     input: Using the web search tool, open https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/web-search and find the exact phrase that describes what Deep Research is best for. Quote only that phrase.
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
     stream: false
     tool_choice: required
@@ -35,7 +35,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-mini-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0b284a664fb26d700169b12d8c288081908f396ac31eeec1f5

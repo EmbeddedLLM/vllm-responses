@@ -7,7 +7,7 @@ request:
         type: function_call_output
       - content: Now call get_weather for location=New York, NY.
         role: user
-    model: gpt-5-nano
+    model: vllm/test-model
     previous_response_id: resp_0b86104b5e19cb1700696e5d602bb88196adb958a91b644dc5
     store: true
     tool_choice:

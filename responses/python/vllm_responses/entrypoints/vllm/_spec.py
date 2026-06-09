@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from vllm_responses.configs.runtime import CodeInterpreterMode, UpstreamAPIKind
+from vllm_responses.configs.runtime import (
+    CodeInterpreterMode,
+    ReasoningEventFormat,
+    UpstreamAPIKind,
+)
 from vllm_responses.configs.startup import (
     find_flag_value,
     format_integrated_responses_help_block,
@@ -27,9 +31,11 @@ class IntegratedServeSpec:
     code_interpreter_startup_timeout_s: float
     code_interpreter_egress_policy_path: str | None = None
     upstream_api_kind: UpstreamAPIKind = "chat_completions"
+    reasoning_event_format: ReasoningEventFormat = "openai"
     mcp_config_path: str | None = None
     mcp_port: int | None = None
     web_search_profile: str | None = None
+    codex_approval_model: str | None = None
 
 
 def should_show_integrated_help(raw_args: list[str]) -> bool:
@@ -83,6 +89,7 @@ def build_integrated_serve_spec(raw_args: list[str]) -> IntegratedServeSpec:
     return IntegratedServeSpec(
         vllm_args=resolved_cli.filtered_args,
         upstream_api_kind=resolved_cli.upstream_api_kind,
+        reasoning_event_format=resolved_cli.reasoning_event_format,
         web_search_profile=resolved_cli.web_search_profile,
         code_interpreter_mode=resolved_cli.code_interpreter_mode,
         code_interpreter_port=resolved_cli.code_interpreter_port,
@@ -91,6 +98,7 @@ def build_integrated_serve_spec(raw_args: list[str]) -> IntegratedServeSpec:
         code_interpreter_egress_policy_path=resolved_cli.code_interpreter_egress_policy_path,
         mcp_config_path=resolved_cli.mcp_config_path,
         mcp_port=resolved_cli.mcp_port,
+        codex_approval_model=resolved_cli.codex_approval_model,
     )
 
 

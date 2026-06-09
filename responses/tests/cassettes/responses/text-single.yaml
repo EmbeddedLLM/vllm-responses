@@ -2,7 +2,7 @@ filename: 2026-01-02-019b7f5d-34f9-7260-847e-3de48265b21f
 request:
   body:
     input: What is the capital of France?
-    model: gpt-5-nano
+    model: vllm/test-model
     stream: false
   headers:
     accept: application/json
@@ -30,7 +30,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0da71a60e97d4f1f006957e6b6cf88819394c0be78cda98736

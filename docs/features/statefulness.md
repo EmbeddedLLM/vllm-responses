@@ -22,7 +22,7 @@ The Responses API introduces **Statefulness** via the `previous_response_id` par
 ```python
 # No previous ID provided
 response_1 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "My name is Alice."}]
 )
 
@@ -38,7 +38,7 @@ print(response_1.id)
 ```python
 # Pass the ID from Step 1
 response_2 = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response_1.id,
     input=[{"role": "user", "content": "What is my name?"}]
 )

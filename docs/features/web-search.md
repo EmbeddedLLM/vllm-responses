@@ -59,7 +59,7 @@ vllm-responses serve \
 ### `vllm serve --responses`
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct \
+vllm serve Qwen/Qwen3.6-35B-A3B \
   --responses \
   --responses-web-search-profile exa_mcp
 ```
@@ -78,7 +78,7 @@ Minimal Python SDK example:
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Find the latest migration notes for vLLM."}],
     tools=[{"type": "web_search"}],
 )

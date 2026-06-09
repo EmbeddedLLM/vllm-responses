@@ -4,7 +4,7 @@ request:
     messages:
       - content: Say something long.
         role: user
-    model: gpt-5-mini
+    model: vllm/test-model
     stream: true
   headers:
     accept: application/json
@@ -23,19 +23,19 @@ response:
     connection: keep-alive
     content-type: text/event-stream; charset=utf-8
   sse:
-    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"gpt-5-mini-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}]}
+    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"role":"assistant","content":"","refusal":null},"finish_reason":null}]}
 
       '
     - "
 
       "
-    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"gpt-5-mini-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Partial output"},"finish_reason":null}]}
+    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{"content":"Partial output"},"finish_reason":null}]}
 
       '
     - "
 
       "
-    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"gpt-5-mini-2025-08-07","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}
+    - 'data: {"id":"chatcmpl-length-demo","object":"chat.completion.chunk","created":1771750548,"model":"vllm/test-model","service_tier":"default","system_fingerprint":null,"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}
 
       '
     - "

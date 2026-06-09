@@ -379,6 +379,7 @@ def test_run_integrated_serve_responses_upstream_uses_internal_base(
         assert runtime_config is not None
         seen["upstream_api_kind"] = runtime_config.upstream_api_kind
         seen["llm_api_base"] = runtime_config.llm_api_base
+        seen["codex_approval_model"] = runtime_config.codex_approval_model
         raise SystemExit(0)
 
     api_server_mod = _install_fake_vllm(monkeypatch, upstream_main=_fake_upstream_main)
@@ -394,6 +395,7 @@ def test_run_integrated_serve_responses_upstream_uses_internal_base(
         code_interpreter_workers=0,
         code_interpreter_startup_timeout_s=30.0,
         upstream_api_kind="responses",
+        codex_approval_model="vllm/test-model",
     )
 
     code = run_integrated_serve(spec)
@@ -401,6 +403,7 @@ def test_run_integrated_serve_responses_upstream_uses_internal_base(
     assert code == 0
     assert seen["upstream_api_kind"] == "responses"
     assert seen["llm_api_base"] == "http://127.0.0.1:8005/_vllm_internal/v1"
+    assert seen["codex_approval_model"] == "vllm/test-model"
 
 
 def test_run_integrated_serve_cleans_spawned_helpers_on_interrupt_during_startup(

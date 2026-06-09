@@ -28,6 +28,7 @@ def _base_args(**overrides) -> argparse.Namespace:
         gateway_port=None,
         gateway_workers=None,
         web_search_profile=None,
+        reasoning_event_format=None,
         code_interpreter="disabled",
         code_interpreter_port=None,
         code_interpreter_workers=None,
@@ -70,6 +71,17 @@ def test_build_runtime_config_for_supervisor_accepts_upstream_api_kind() -> None
     assert runtime_config.upstream_api_kind == "responses"
 
 
+def test_build_runtime_config_for_supervisor_accepts_reasoning_event_format() -> None:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            reasoning_event_format="openresponses",
+        ),
+        env=EnvSource(environ={}),
+    )
+    assert runtime_config.reasoning_event_format == "openresponses"
+
+
 def test_build_runtime_config_for_supervisor_accepts_hyphenated_chat_completions_alias() -> None:
     runtime_config = build_runtime_config_for_supervisor(
         args=_base_args(
@@ -79,6 +91,20 @@ def test_build_runtime_config_for_supervisor_accepts_hyphenated_chat_completions
         env=EnvSource(environ={}),
     )
     assert runtime_config.upstream_api_kind == "chat_completions"
+
+
+def test_build_runtime_config_for_supervisor_rejects_unknown_reasoning_event_format() -> None:
+    with pytest.raises(
+        RuntimeConfigError,
+        match=r"--reasoning-event-format must be one of \{openai,openresponses\}",
+    ):
+        build_runtime_config_for_supervisor(
+            args=_base_args(
+                upstream="http://127.0.0.1:8457",
+                reasoning_event_format="codex",
+            ),
+            env=EnvSource(environ={}),
+        )
 
 
 def test_build_runtime_config_for_supervisor_rejects_unknown_upstream_api_kind() -> None:
@@ -109,6 +135,33 @@ def test_build_gateway_worker_env_propagates_upstream_api_kind() -> None:
     worker_env = _build_gateway_worker_env(spec=spec, prometheus_multiproc_dir=None)
 
     assert worker_env["VR_UPSTREAM_API_KIND"] == "responses"
+    assert worker_env["VR_REASONING_EVENT_FORMAT"] == "openai"
+
+
+def test_build_gateway_worker_env_propagates_reasoning_event_format() -> None:
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(
+            upstream="http://127.0.0.1:8457",
+            reasoning_event_format="openresponses",
+        ),
+        env=EnvSource(environ={}),
+    )
+    spec = build_serve_spec(runtime_config)
+
+    worker_env = _build_gateway_worker_env(spec=spec, prometheus_multiproc_dir=None)
+
+    assert worker_env["VR_REASONING_EVENT_FORMAT"] == "openresponses"
+
+
+def test_build_runtime_config_for_supervisor_ignores_env_reasoning_event_format_without_cli() -> (
+    None
+):
+    runtime_config = build_runtime_config_for_supervisor(
+        args=_base_args(upstream="http://127.0.0.1:8457"),
+        env=EnvSource(environ={"VR_REASONING_EVENT_FORMAT": "openresponses"}),
+    )
+
+    assert runtime_config.reasoning_event_format == "openai"
 
 
 def test_build_runtime_config_for_supervisor_ignores_env_upstream_without_cli() -> None:

@@ -8,12 +8,17 @@ from vllm_responses.responses_core.models import (
     CodeInterpreterCallCompleted,
     CodeInterpreterCallInterpreting,
     CodeInterpreterCallStarted,
+    CustomToolCallDone,
+    CustomToolCallStarted,
     FunctionCallArgumentsDelta,
     FunctionCallDone,
     FunctionCallStarted,
     MessageDelta,
     MessageDone,
     MessageStarted,
+    ReasoningDelta,
+    ReasoningDone,
+    ReasoningStarted,
     UsageFinal,
     WebSearchCallCompleted,
     WebSearchCallSearching,
@@ -94,6 +99,93 @@ def test_completed_response_omits_reasoning_item_when_no_thinking_part():
     assert [o.type for o in resp.output] == ["message"]
 
 
+def test_reasoning_item_done_is_emitted_after_reasoning_text_is_available():
+    composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
+
+    out = _drain(
+        composer,
+        [
+            ReasoningStarted(item_key="r1"),
+            ReasoningDelta(item_key="r1", delta="think "),
+            ReasoningDelta(item_key="r1", delta="hard"),
+            ReasoningDone(item_key="r1", text="think hard"),
+            MessageStarted(item_key="m1"),
+            MessageDone(item_key="m1", text="Done"),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=2,
+                total_tokens=3,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=2,
+            ),
+        ],
+    )
+
+    reasoning_added = [
+        e for e in out if e.type == "response.output_item.added" and e.item.type == "reasoning"
+    ]
+    assert len(reasoning_added) == 1
+
+    reasoning_deltas = [e for e in out if e.type == "response.reasoning_text.delta"]
+    assert [e.delta for e in reasoning_deltas] == ["think ", "hard"]
+
+    reasoning_done_text = [e for e in out if e.type == "response.reasoning_text.done"]
+    assert len(reasoning_done_text) == 1
+    assert reasoning_done_text[0].text == "think hard"
+
+    reasoning_item_done = [
+        e for e in out if e.type == "response.output_item.done" and e.item.type == "reasoning"
+    ]
+    assert len(reasoning_item_done) == 1
+    assert reasoning_item_done[0].item.content[0].type == "reasoning_text"
+    assert reasoning_item_done[0].item.content[0].text == "think hard"
+
+    completed = [e for e in out if e.type == "response.completed"]
+    assert len(completed) == 1
+    completed_reasoning = completed[0].response.output[0]
+    assert completed_reasoning.type == "reasoning"
+    assert completed_reasoning.content[0].text == "think hard"
+
+
+def test_openresponses_reasoning_event_format_uses_reasoning_events():
+    composer = ResponseComposer(
+        response=OpenAIResponsesResponse(model="test-model"),
+        reasoning_event_format="openresponses",
+    )
+
+    out = _drain(
+        composer,
+        [
+            ReasoningStarted(item_key="r1"),
+            ReasoningDelta(item_key="r1", delta="think"),
+            ReasoningDone(item_key="r1", text="think"),
+            UsageFinal(
+                input_tokens=1,
+                output_tokens=1,
+                total_tokens=2,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                reasoning_tokens=1,
+            ),
+        ],
+    )
+
+    assert [e.type for e in out if e.type == "response.reasoning.delta"] == [
+        "response.reasoning.delta"
+    ]
+    assert [e.type for e in out if e.type == "response.reasoning.done"] == [
+        "response.reasoning.done"
+    ]
+    assert not [e for e in out if e.type == "response.reasoning_text.delta"]
+    reasoning_item_done = [
+        e for e in out if e.type == "response.output_item.done" and e.item.type == "reasoning"
+    ]
+    assert len(reasoning_item_done) == 1
+    assert reasoning_item_done[0].item.content[0].type == "reasoning_text"
+    assert reasoning_item_done[0].item.content[0].text == "think"
+
+
 def test_incomplete_response_sets_incomplete_details_for_max_output_tokens():
     composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
 
@@ -165,6 +257,66 @@ def test_function_call_arguments_deltas_attributed_to_function_item():
     assert arg_deltas
     assert {d.item_id for d in arg_deltas} == {fc_item_id}
     assert {d.output_index for d in arg_deltas} == {fc_out_index}
+
+
+def test_function_call_preserves_namespace_on_added_and_done_items():
+    composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
+
+    out = _drain(
+        composer,
+        [
+            FunctionCallStarted(
+                item_key="fc1",
+                call_id="call_123",
+                name="lookup_order",
+                initial_arguments_json="",
+                namespace="mcp__demo__",
+            ),
+            FunctionCallDone(item_key="fc1", arguments_json='{"order_id":"1"}'),
+        ],
+    )
+
+    function_items = [
+        e.item
+        for e in out
+        if e.type in {"response.output_item.added", "response.output_item.done"}
+        and e.item.type == "function_call"
+    ]
+    assert [item.name for item in function_items] == ["lookup_order", "lookup_order"]
+    assert [item.namespace for item in function_items] == ["mcp__demo__", "mcp__demo__"]
+
+
+def test_custom_tool_call_serializes_as_custom_output_item():
+    composer = ResponseComposer(response=OpenAIResponsesResponse(model="test-model"))
+
+    out = _drain(
+        composer,
+        [
+            CustomToolCallStarted(
+                item_key="ctc1",
+                call_id="call_123",
+                name="apply_patch",
+            ),
+            CustomToolCallDone(
+                item_key="ctc1",
+                input="*** Begin Patch\n*** End Patch\n",
+            ),
+        ],
+    )
+
+    custom_items = [
+        e.item
+        for e in out
+        if e.type in {"response.output_item.added", "response.output_item.done"}
+        and e.item.type == "custom_tool_call"
+    ]
+    assert len(custom_items) == 2
+    assert [item.name for item in custom_items] == ["apply_patch", "apply_patch"]
+    assert [item.call_id for item in custom_items] == ["call_123", "call_123"]
+    assert custom_items[0].input == ""
+    assert custom_items[0].status == "in_progress"
+    assert custom_items[1].input == "*** Begin Patch\n*** End Patch\n"
+    assert custom_items[1].status == "completed"
 
 
 def test_code_interpreter_outputs_populated_on_completion():

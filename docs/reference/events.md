@@ -188,10 +188,18 @@ ______________________________________________________________________
 
 For models that support reasoning (Chain of Thought).
 
+### `response.reasoning_text.delta`
+
+Streaming reasoning text content. This is the default event family when `--reasoning-event-format openai` is active.
+
+### `response.reasoning_text.done`
+
+Reasoning text is complete. This is the default event family when `--reasoning-event-format openai` is active.
+
 ### `response.reasoning.delta`
 
-Streaming reasoning content.
+Streaming reasoning text content when `--reasoning-event-format openresponses` is active.
 
 ### `response.reasoning.done`
 
-Reasoning is complete.
+Reasoning text is complete when `--reasoning-event-format openresponses` is active.

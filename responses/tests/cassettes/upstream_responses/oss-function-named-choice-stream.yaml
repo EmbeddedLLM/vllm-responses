@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3dbf-12e0-7bf1-8f1b-237938cbddfd
 request:
   body:
     input: Call the function get_weather for Paris and do not answer directly.
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
     store: false
     stream: true
     tool_choice:
@@ -28,7 +28,7 @@ request:
     content-length: "428"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: gptoss20b-responses-function-named-choice-stream.yaml
+    x-run-id: oss-function-named-choice-stream.yaml
   method: POST
   path: /v1/responses
   query_params: {}

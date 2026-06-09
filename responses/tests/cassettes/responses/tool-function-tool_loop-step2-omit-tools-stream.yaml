@@ -5,7 +5,7 @@ request:
       - call_id: call_RYBUL1i3RTzZk5fDdDPRbevp
         output: The weather in Boston, MA is sunny, 72F.
         type: function_call_output
-    model: gpt-5-nano
+    model: vllm/test-model
     previous_response_id: resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124
     store: true
     stream: true
@@ -30,7 +30,7 @@ response:
     - "event: response.created
 
       "
-    - 'data: {"type":"response.created","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-nano-2025-08-07","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    - 'data: {"type":"response.created","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"vllm/test-model","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
 
       '
     - "
@@ -39,7 +39,7 @@ response:
     - "event: response.in_progress
 
       "
-    - 'data: {"type":"response.in_progress","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-nano-2025-08-07","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"vllm/test-model","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
 
       '
     - "
@@ -345,7 +345,7 @@ response:
     - "event: response.completed
 
       "
-    - 'data: {"type":"response.completed","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"completed","background":false,"completed_at":1768895275,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5-nano-2025-08-07","output":[{"id":"rs_0ea821c0cdc786b800696f33291b5c819b82034112a2c4db07","type":"reasoning","summary":[]},{"id":"msg_0ea821c0cdc786b800696f332b5060819ba73b37ec4479e23c","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The weather in Boston, MA is sunny, 72°F. Would you like an hourly forecast or a 7-day outlook?"}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":346,"input_tokens_details":{"cached_tokens":0},"output_tokens":224,"output_tokens_details":{"reasoning_tokens":192},"total_tokens":570},"user":null,"metadata":{}},"sequence_number":35}
+    - 'data: {"type":"response.completed","response":{"id":"resp_0ea821c0cdc786b800696f33288ccc819bb4da63bbf5c70690","object":"response","created_at":1768895272,"status":"completed","background":false,"completed_at":1768895275,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"vllm/test-model","output":[{"id":"rs_0ea821c0cdc786b800696f33291b5c819b82034112a2c4db07","type":"reasoning","summary":[]},{"id":"msg_0ea821c0cdc786b800696f332b5060819ba73b37ec4479e23c","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The weather in Boston, MA is sunny, 72°F. Would you like an hourly forecast or a 7-day outlook?"}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0ea821c0cdc786b800696f3324643c819ba894c7777b697124","prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":346,"input_tokens_details":{"cached_tokens":0},"output_tokens":224,"output_tokens_details":{"reasoning_tokens":192},"total_tokens":570},"user":null,"metadata":{}},"sequence_number":35}
 
       '
     - "

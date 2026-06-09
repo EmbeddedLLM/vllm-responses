@@ -31,6 +31,8 @@ from vllm_responses.responses_core.models import (
     CodeInterpreterCallCompleted,
     CodeInterpreterCallInterpreting,
     CodeInterpreterCallStarted,
+    CustomToolCallDone,
+    CustomToolCallStarted,
     FunctionCallArgumentsDelta,
     FunctionCallDone,
     FunctionCallStarted,
@@ -60,6 +62,7 @@ from vllm_responses.tools.web_search.types import (
     SearchActionPublic,
     parse_web_search_tool_result,
 )
+from vllm_responses.types.openai import CodexCompatContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,12 +87,19 @@ class PydanticAINormalizer:
         mcp_tool_name_map: dict[str, McpToolRef] | None = None,
         text_tool_call_probe_names: set[str] | None = None,
         named_function_tool_choice: str | None = None,
+        codex_compat: CodexCompatContext | None = None,
     ) -> None:
         self._builtin_tool_names = builtin_tool_names
         self._code_interpreter_tool_name = code_interpreter_tool_name
         self._mcp_tool_name_map = mcp_tool_name_map or {}
         self._text_tool_call_probe_names = text_tool_call_probe_names or set()
         self._named_function_tool_choice = named_function_tool_choice
+        if codex_compat is not None:
+            self._codex_namespace_tool_map = codex_compat.namespace_tool_map
+            self._codex_custom_tool_names = codex_compat.custom_tool_names
+        else:
+            self._codex_namespace_tool_map = {}
+            self._codex_custom_tool_names = set()
 
         self._index_to_item_key: dict[int, str] = {}
         self._tool_call_id_to_item_key: dict[str, str] = {}
@@ -181,13 +191,25 @@ class PydanticAINormalizer:
                         yield CodeInterpreterCallCodeDelta(item_key=item_key, delta=code_delta)
                 return
 
+            if tool_name in self._codex_custom_tool_names:
+                record_tool_call_requested("custom")
+                self._item_kind[item_key] = "custom_tool_call"
+                yield CustomToolCallStarted(
+                    item_key=item_key,
+                    call_id=part.tool_call_id,
+                    name=tool_name,
+                )
+                return
+
             record_tool_call_requested("function")
             self._item_kind[item_key] = "function_call"
+            name, namespace = self._codex_resolve_function_name_and_namespace(tool_name)
             yield FunctionCallStarted(
                 item_key=item_key,
                 call_id=part.tool_call_id,
-                name=tool_name,
+                name=name,
                 initial_arguments_json="",
+                namespace=namespace,
             )
             if part.args_as_json_str():
                 yield FunctionCallArgumentsDelta(item_key=item_key, delta=part.args_as_json_str())
@@ -262,6 +284,9 @@ class PydanticAINormalizer:
             if kind == "web_search_call":
                 return
 
+            if kind == "custom_tool_call":
+                return
+
             if delta.args_delta is None:
                 return
             yield FunctionCallArgumentsDelta(
@@ -294,14 +319,30 @@ class PydanticAINormalizer:
                     return
 
                 call_id = f"call_{item_key.replace(':', '_')}"
-                self._item_kind[item_key] = "function_call"
                 self._tool_call_id_to_item_key[call_id] = item_key
+                if parsed.name in self._codex_custom_tool_names:
+                    self._item_kind[item_key] = "custom_tool_call"
+                    record_tool_call_requested("custom")
+                    yield CustomToolCallStarted(
+                        item_key=item_key,
+                        call_id=call_id,
+                        name=parsed.name,
+                    )
+                    yield CustomToolCallDone(
+                        item_key=item_key,
+                        input=_custom_tool_input_from_arguments(parsed.arguments_json),
+                    )
+                    return
+
+                self._item_kind[item_key] = "function_call"
                 record_tool_call_requested("function")
+                name, namespace = self._codex_resolve_function_name_and_namespace(parsed.name)
                 yield FunctionCallStarted(
                     item_key=item_key,
                     call_id=call_id,
-                    name=parsed.name,
+                    name=name,
                     initial_arguments_json="",
+                    namespace=namespace,
                 )
                 yield FunctionCallDone(
                     item_key=item_key,
@@ -329,6 +370,11 @@ class PydanticAINormalizer:
                 yield McpCallArgumentsDone(
                     item_key=tool_item_key,
                     arguments_json=part.args_as_json_str(),
+                )
+            elif kind == "custom_tool_call":
+                yield CustomToolCallDone(
+                    item_key=tool_item_key,
+                    input=_custom_tool_input_from_arguments(part.args_as_json_str()),
                 )
             else:
                 yield FunctionCallDone(
@@ -365,6 +411,13 @@ class PydanticAINormalizer:
         if event.result.tool_name != self._code_interpreter_tool_name:
             return
         yield from self._on_code_interpreter_tool_result(event=event, item_key=item_key)
+
+    def _codex_resolve_function_name_and_namespace(self, tool_name: str) -> tuple[str, str | None]:
+        ref = self._codex_namespace_tool_map.get(tool_name)
+        if ref is None:
+            return tool_name, None
+        namespace, name = ref
+        return name, namespace
 
     def _on_web_search_tool_result(
         self, *, event: FunctionToolResultEvent, item_key: str
@@ -489,6 +542,18 @@ def _json_dumps(value: dict[str, Any]) -> str:
     import json
 
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _custom_tool_input_from_arguments(arguments_json: str) -> str:
+    try:
+        payload = json.loads(arguments_json)
+    except json.JSONDecodeError:
+        return arguments_json
+    if isinstance(payload, dict):
+        value = payload.get("input")
+        if isinstance(value, str):
+            return value
+    return arguments_json
 
 
 def _extract_raw_reasoning_content(provider_details: Any) -> list[str] | None:

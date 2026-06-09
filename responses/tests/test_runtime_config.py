@@ -260,3 +260,28 @@ def test_get_openai_provider_defaults_to_standalone_client(monkeypatch) -> None:
     _ = get_openai_provider(runtime_config)
 
     assert captured["http_client"] is LM_CLIENT
+
+
+def test_build_runtime_config_for_standalone_reads_codex_approval_model() -> None:
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_LLM_API_BASE": "http://127.0.0.1:9000/v1",
+                "VR_CODEX_APPROVAL_MODEL": "vllm/test-model",
+            }
+        )
+    )
+
+    assert runtime_config.codex_approval_model == "vllm/test-model"
+
+
+def test_build_runtime_config_for_standalone_codex_approval_model_defaults_to_none() -> None:
+    runtime_config = build_runtime_config_for_standalone(
+        env=EnvSource(
+            environ={
+                "VR_LLM_API_BASE": "http://127.0.0.1:9000/v1",
+            }
+        )
+    )
+
+    assert runtime_config.codex_approval_model is None

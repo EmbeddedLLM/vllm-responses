@@ -5,7 +5,7 @@ request:
       - call_id: call_3phuilZBndrwjXPPbbJxPUsm
         output: The weather in Boston, MA is sunny, 72F.
         type: function_call_output
-    model: gpt-5-nano
+    model: vllm/test-model
     previous_response_id: resp_0e9b91731bd16bb700696e5cefc4908193a611a1f14a177cdd
     store: true
   headers:
@@ -36,7 +36,7 @@ response:
     max_output_tokens: null
     max_tool_calls: null
     metadata: {}
-    model: gpt-5-nano-2025-08-07
+    model: vllm/test-model
     object: response
     output:
       - id: rs_0e9b91731bd16bb700696e5cf4f340819388065365288c833f

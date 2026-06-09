@@ -70,6 +70,22 @@ These options control the `vllm-responses` server itself.
 
 **Description**: Number of Gunicorn workers to spawn. **Default**: `1` **Notes**: For production, use multiple workers (e.g., `2 * CPU_CORES + 1`).
 
+### Reasoning Stream Configuration
+
+#### `--reasoning-event-format {openai,openresponses}`
+
+**Description**: Selects downstream reasoning stream event names. **Default**: `openai`
+
+**Values**:
+
+- `openai`: emit `response.reasoning_text.delta` and `response.reasoning_text.done`.
+- `openresponses`: emit `response.reasoning.delta` and `response.reasoning.done`.
+
+**Notes**:
+
+- This changes only stream event names for raw reasoning text. Reasoning output items still use `content[].type="reasoning_text"`.
+- The corresponding integrated-mode selector is `--responses-reasoning-event-format {openai,openresponses}` on `vllm serve --responses`.
+
 ### Web Search Configuration
 
 #### `--web-search-profile PROFILE`
@@ -127,7 +143,7 @@ ______________________________________________________________________
 
 Deployment-scoped environment variables such as storage, metrics, tracing, auth, and cache remain separate from this CLI surface.
 
-Gateway-owned feature-selection flags on this command, including `--web-search-profile`, do not use environment-variable fallback.
+Gateway-owned feature-selection flags on this command, including `--web-search-profile` and `--reasoning-event-format`, do not use environment-variable fallback.
 
 Built-in MCP runtime configuration is CLI-owned in this command:
 
@@ -163,7 +179,7 @@ Integrated mode transport selection:
 ### Use the Colocated Single-Command Mode
 
 ```bash
-vllm serve meta-llama/Llama-3.2-3B-Instruct --responses
+vllm serve Qwen/Qwen3.6-35B-A3B --responses
 ```
 
 ### Run the Remote-Upstream Gateway With More Workers

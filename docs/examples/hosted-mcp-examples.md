@@ -46,7 +46,7 @@ Python SDK equivalent:
 
 ```python
 response = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     stream=True,
     input=[{"role": "user", "content": "Find migration notes in docs."}],
     tools=[
@@ -78,7 +78,7 @@ If `store=true` (default), the response ID from a terminal response can be reuse
 
 ```python
 follow_up = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     previous_response_id=response.id,
     input=[{"role": "user", "content": "Summarize that in one sentence."}],
 )
@@ -90,7 +90,7 @@ Use Remote MCP mode when you want to declare an MCP endpoint directly in the req
 
 ```python
 remote = client.responses.create(
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="Qwen/Qwen3.6-35B-A3B",
     input=[{"role": "user", "content": "Search remote docs for migration notes."}],
     tools=[
         {

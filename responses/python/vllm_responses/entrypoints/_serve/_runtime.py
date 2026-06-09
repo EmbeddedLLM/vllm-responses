@@ -52,6 +52,7 @@ def _build_gateway_worker_env(
 
     gateway_env["VR_LLM_API_BASE"] = spec.upstream.base_url
     gateway_env["VR_UPSTREAM_API_KIND"] = runtime_config.upstream_api_kind
+    gateway_env["VR_REASONING_EVENT_FORMAT"] = runtime_config.reasoning_event_format
     gateway_env["VR_HOST"] = spec.gateway.host
     gateway_env["VR_PORT"] = str(spec.gateway.port)
     gateway_env["VR_WORKERS"] = str(spec.gateway.workers)
@@ -61,6 +62,11 @@ def _build_gateway_worker_env(
         gateway_env["VR_WEB_SEARCH_PROFILE"] = runtime_config.web_search_profile
     else:
         gateway_env.pop("VR_WEB_SEARCH_PROFILE", None)
+
+    if runtime_config.codex_approval_model is not None:
+        gateway_env["VR_CODEX_APPROVAL_MODEL"] = runtime_config.codex_approval_model
+    else:
+        gateway_env.pop("VR_CODEX_APPROVAL_MODEL", None)
 
     if runtime_config.mcp_config_path is not None:
         gateway_env["VR_MCP_CONFIG_PATH"] = runtime_config.mcp_config_path

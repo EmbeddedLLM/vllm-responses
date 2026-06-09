@@ -6,6 +6,7 @@ from typing import Literal
 RuntimeMode = Literal["standalone", "supervisor", "integrated", "mock_llm"]
 CodeInterpreterMode = Literal["spawn", "external", "disabled"]
 UpstreamAPIKind = Literal["chat_completions", "responses"]
+ReasoningEventFormat = Literal["openai", "openresponses"]
 
 INTERNAL_UPSTREAM_HEADER_NAME = "x-vr-internal-upstream"
 INTEGRATED_INTERNAL_ROUTE_PREFIX = "/_vllm_internal"
@@ -15,6 +16,7 @@ INTEGRATED_INTERNAL_ROUTE_PREFIX = "/_vllm_internal"
 class RuntimeConfig:
     runtime_mode: RuntimeMode
     upstream_api_kind: UpstreamAPIKind
+    reasoning_event_format: ReasoningEventFormat
 
     gateway_host: str
     gateway_port: int
@@ -62,6 +64,7 @@ class RuntimeConfig:
     response_store_cache_ttl_seconds: int
 
     internal_upstream_header_name: str = INTERNAL_UPSTREAM_HEADER_NAME
+    codex_approval_model: str | None = None
 
     @property
     def db_dialect(self) -> Literal["sqlite", "postgresql"]:

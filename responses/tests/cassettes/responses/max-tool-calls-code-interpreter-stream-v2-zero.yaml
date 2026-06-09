@@ -5,7 +5,7 @@ request:
       - content: Use code interpreter once and print 'HELLO'.
         role: user
     max_tool_calls: 0
-    model: gpt-5-mini
+    model: vllm/test-model
     store: false
     stream: true
     tool_choice: required

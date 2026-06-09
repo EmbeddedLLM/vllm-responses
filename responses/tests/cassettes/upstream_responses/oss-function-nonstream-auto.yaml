@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3cc9-3947-7113-9b9c-6d7ef4646bbe
 request:
   body:
     input: Call the function get_weather for Paris and do not answer directly.
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
     stream: false
     tool_choice: auto
     tools:
@@ -40,7 +40,7 @@ response:
     max_output_tokens: 130940
     max_tool_calls: null
     metadata: null
-    model: openai/gpt-oss-20b
+    model: vllm/test-model
     object: response
     output:
       - content:

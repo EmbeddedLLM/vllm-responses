@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3cc9-dd2b-7842-8dd6-d132106b157a
 request:
   body:
     input: "Say exactly: hello"
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     store: false
     stream: true
   headers:
@@ -12,7 +12,7 @@ request:
     content-length: "89"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: qwen35a3b-responses-text-stream.yaml
+    x-run-id: text-stream.yaml
   method: POST
   path: /v1/responses
   query_params: {}
@@ -24,7 +24,7 @@ response:
     - "event: response.created
 
       "
-    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
 
       '
     - "
@@ -33,7 +33,7 @@ response:
     - "event: response.in_progress
 
       "
-    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
 
       '
     - "
@@ -1347,7 +1347,7 @@ response:
     - "event: response.completed
 
       "
-    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B","object":"response","output":[{"id":"rs_8cf16177eafae7b7","summary":[],"type":"reasoning","content":[{"text":"Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Say exactly: hello\". This is a direct command to output a specific string.\n\n2.  **Identify Constraints:** The constraint is \"exactly\". This means I should not add any extra text, punctuation, explanations, or formatting beyond the word \"hello\".\n\n3.  **Determine the Output:** The output should be the word \"hello\".\n\n4.  **Verify:** Does \"hello\" match the requested phrase? Yes. Does it include any extra content? No.\n\n5.  **Final Decision:** Output \"hello\".\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_b68e238a7c75e569","content":[{"annotations":[],"text":"\n\nhello","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":14,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":137,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":151},"user":null,"input_messages":null,"output_messages":null},"sequence_number":147,"type":"response.completed"}
+    - 'data: {"response":{"id":"resp_aa10853a136064bc","created_at":1774841355,"incomplete_details":null,"instructions":null,"metadata":null,"model":"vllm/test-model","object":"response","output":[{"id":"rs_8cf16177eafae7b7","summary":[],"type":"reasoning","content":[{"text":"Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Say exactly: hello\". This is a direct command to output a specific string.\n\n2.  **Identify Constraints:** The constraint is \"exactly\". This means I should not add any extra text, punctuation, explanations, or formatting beyond the word \"hello\".\n\n3.  **Determine the Output:** The output should be the word \"hello\".\n\n4.  **Verify:** Does \"hello\" match the requested phrase? Yes. Does it include any extra content? No.\n\n5.  **Final Decision:** Output \"hello\".\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_b68e238a7c75e569","content":[{"annotations":[],"text":"\n\nhello","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"auto","tools":[],"top_p":0.95,"background":false,"max_output_tokens":262130,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":14,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":137,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":151},"user":null,"input_messages":null,"output_messages":null},"sequence_number":147,"type":"response.completed"}
 
       '
     - "

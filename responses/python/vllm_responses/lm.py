@@ -194,7 +194,12 @@ class LMEngine:
         hydrated_body = await self._store.rehydrate_request(request=self._body)
         self._hydrated_body = hydrated_body
         agent = self._build_agent(hydrated_body)
-        run_settings, builtin_tools, mcp_tool_name_map = await hydrated_body.as_run_settings(
+        (
+            run_settings,
+            builtin_tools,
+            mcp_tool_name_map,
+            codex_compat_context,
+        ) = await hydrated_body.as_run_settings(
             builtin_mcp_runtime_client=self._builtin_mcp_runtime_client,
             request_remote_enabled=self._runtime_config.mcp_request_remote_enabled,
             request_remote_url_checks_enabled=self._runtime_config.mcp_request_remote_url_checks,
@@ -215,6 +220,8 @@ class LMEngine:
             for tool in (hydrated_body.tools or ())
             if isinstance(tool, OpenAIResponsesFunctionTool)
         }
+        function_tool_names.update(codex_compat_context.namespace_tool_map)
+        function_tool_names.update(codex_compat_context.custom_tool_names)
         named_function_tool_choice = None
         if isinstance(hydrated_body.tool_choice, OpenAIFunctionToolChoice):
             named_function_tool_choice = hydrated_body.tool_choice.name
@@ -240,9 +247,14 @@ class LMEngine:
             mcp_tool_name_map=mcp_tool_name_map,
             text_tool_call_probe_names=function_tool_names if probe_text_tool_calls else set(),
             named_function_tool_choice=named_function_tool_choice,
+            codex_compat=codex_compat_context,
         )
         include_set = set(hydrated_body.include or [])
-        composer = ResponseComposer(response=response, include=include_set)
+        composer = ResponseComposer(
+            response=response,
+            include=include_set,
+            reasoning_event_format=self._runtime_config.reasoning_event_format,
+        )
         return ResponseRunContext(
             agent=agent,
             response=response,
@@ -258,17 +270,24 @@ class LMEngine:
         # Build the model from the hydrated request so inherited tool policy from
         # `previous_response_id` is reflected consistently in backend-specific settings.
         provider = get_openai_provider(self._runtime_config)
+        model_name = body.model
+        # HACK: Codex auto review hardcoded this model id
+        if (
+            self._runtime_config.codex_approval_model is not None
+            and body.model == "codex-auto-review"
+        ):
+            model_name = self._runtime_config.codex_approval_model
         if self._runtime_config.upstream_api_kind == "responses":
             return Agent(
                 OpenAIResponsesModel(
-                    model_name=body.model,
+                    model_name=model_name,
                     provider=provider,
                 ),
                 model_settings=body.as_openai_responses_settings(),
             )
         return Agent(
             OpenAIChatModel(
-                model_name=body.model,
+                model_name=model_name,
                 provider=provider,
             ),
             model_settings=body.as_openai_chat_settings(),

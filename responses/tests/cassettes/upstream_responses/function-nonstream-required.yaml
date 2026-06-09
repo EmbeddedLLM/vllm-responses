@@ -2,7 +2,7 @@ filename: 2026-03-30-019d3cc9-e143-7b43-853c-814c2575358d
 request:
   body:
     input: Call the function get_weather for Boston and do not answer directly.
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     store: false
     stream: false
     tool_choice: required
@@ -26,7 +26,7 @@ request:
     content-length: "394"
     content-type: application/json
     user-agent: python-httpx/0.28.1
-    x-run-id: qwen35a3b-responses-function-nonstream-required.yaml
+    x-run-id: function-nonstream-required.yaml
   method: POST
   path: /v1/responses
   query_params: {}
@@ -42,7 +42,7 @@ response:
     max_output_tokens: 261847
     max_tool_calls: null
     metadata: null
-    model: Qwen/Qwen3.5-35B-A3B
+    model: vllm/test-model
     object: response
     output:
       - content:
